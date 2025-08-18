@@ -1,37 +1,37 @@
-function visualizeSchedule(schedule, varargin)
-% Create a Gantt chart visualization of the EP lab schedule
+function visualizeSchedule(schedule, results, varargin)
+% Create a Gantt chart visualization of the optimized EP lab schedule
 %
 % Inputs:
-%   schedule - Schedule structure from scheduleEPCases()
+%   schedule - Schedule structure from scheduleHistoricalCases()
+%   results - Results structure from scheduleHistoricalCases()
 %   
 % Optional Parameters (Name-Value pairs):
-%   'Title' - Chart title (default: 'EP Lab Schedule')
+%   'Title' - Chart title (default: 'Optimized EP Lab Schedule')
 %   'ShowLabels' - Show case ID labels on bars (default: true)
-%   'TimeRange' - [startTime, endTime] datetime array (default: auto)
+%   'TimeRange' - [startTime, endTime] in minutes since midnight (default: auto)
 %   'FontSize' - Font size for labels (default: 8)
 %   'FigureSize' - [width, height] in pixels (default: [1200, 800])
-%   'ShowHistorical' - Show actual historical schedule alongside optimized (default: false)
-%   'HistoricalData' - Historical data structure (required if ShowHistorical is true)
+%   'ShowTurnover' - Show turnover time as separate segments (default: false)
 %   'Debug' - Show debug output (default: false)
 %
 % Example:
 %   cases = getCasesByDate('05-01-2025');
-%   [schedule, metrics] = scheduleEPCases(cases);
-%   visualizeSchedule(schedule, 'Title', 'May 1st Schedule');
+%   [schedule, results] = scheduleHistoricalCases(cases);
+%   visualizeOptimizedSchedule(schedule, results, 'Title', 'May 1st Optimized Schedule');
 
 % Parse input parameters
 p = inputParser;
 addRequired(p, 'schedule', @isstruct);
+addRequired(p, 'results', @isstruct);
 addParameter(p, 'Title', 'EP Lab Schedule', @ischar);
 addParameter(p, 'ShowLabels', true, @islogical);
-addParameter(p, 'TimeRange', [], @(x) isempty(x) || (isdatetime(x) && length(x) == 2));
+addParameter(p, 'TimeRange', [], @(x) isempty(x) || (isnumeric(x) && length(x) == 2));
 addParameter(p, 'FontSize', 8, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'FigureSize', [1200, 800], @(x) isnumeric(x) && length(x) == 2);
-addParameter(p, 'ShowHistorical', false, @islogical);
-addParameter(p, 'HistoricalData', struct(), @isstruct);
+addParameter(p, 'ShowTurnover', false, @islogical);
 addParameter(p, 'Debug', false, @islogical);
 
-parse(p, schedule, varargin{:});
+parse(p, schedule, results, varargin{:});
 
 % Extract parameters
 chartTitle = p.Results.Title;
@@ -39,161 +39,190 @@ showLabels = p.Results.ShowLabels;
 timeRange = p.Results.TimeRange;
 fontSize = p.Results.FontSize;
 figSize = p.Results.FigureSize;
-showHistorical = p.Results.ShowHistorical;
-historicalData = p.Results.HistoricalData;
+showTurnover = p.Results.ShowTurnover;
 debugMode = p.Results.Debug;
 
 % Validate input
-if isempty(schedule)
+if isempty(schedule.labs) || all(cellfun(@isempty, schedule.labs))
     fprintf('No schedule data to visualize.\n');
     return;
 end
 
-% Validate historical data if requested
-if showHistorical
-    if ~isfield(historicalData, 'procedureStartTimeOfDay') || ~isfield(historicalData, 'procedureCompleteTimeOfDay')
-        error('HistoricalData must contain procedureStartTimeOfDay and procedureCompleteTimeOfDay fields for historical visualization');
-    end
-    if debugMode
-        fprintf('Historical visualization enabled with %d historical cases\n', length(historicalData.caseID));
+% Extract data from schedule structure
+allCases = [];
+numLabs = length(schedule.labs);
+
+% Collect all cases from all labs
+for j = 1:numLabs
+    if ~isempty(schedule.labs{j})
+        labCases = schedule.labs{j};
+        for k = 1:length(labCases)
+            caseInfo = labCases(k);
+            caseInfo.lab = j;  % Add lab number
+            allCases = [allCases; caseInfo];
+        end
     end
 end
 
-% Get unique labs and operators
-labs = unique([schedule.lab]);
-operators = unique({schedule.operator});
-numLabs = length(labs);
+if isempty(allCases)
+    fprintf('No cases found in schedule.\n');
+    return;
+end
+
+% Get unique operators
+operatorNames = {allCases.operator};
+uniqueOperators = unique(operatorNames);
+numOperators = length(uniqueOperators);
 
 % Create color map for operators
-colors = lines(length(operators));
+colors = lines(numOperators);
 operatorColorMap = containers.Map();
-for i = 1:length(operators)
-    operatorColorMap(operators{i}) = colors(i,:);
+for i = 1:numOperators
+    operatorColorMap(uniqueOperators{i}) = colors(i,:);
 end
 
-% Set up time range
+% Set up time range (convert to hours for plotting)
 if isempty(timeRange)
-    if ~isempty(schedule)
-        allTimes = [schedule.setupStart, schedule.postEnd];
-        scheduleStart = min(allTimes);
-        scheduleEnd = max(allTimes);
-        
-        % Start 1 hour before first case, end 1 hour after last case
-        timeRange = [scheduleStart - hours(1), scheduleEnd + hours(1)];
-    else
-        % Default range if no schedule (7 AM to 8 PM)
-        baseDate = datetime(2024, 1, 1);
-        timeRange = [datetime(baseDate.Year, baseDate.Month, baseDate.Day, 7, 0, 0), ...
-                    datetime(baseDate.Year, baseDate.Month, baseDate.Day, 20, 0, 0)];
-    end
+    allStartTimes = [allCases.startTime];
+    allEndTimes = [allCases.endTime];
+    scheduleStart = min(allStartTimes);
+    scheduleEnd = max(allEndTimes);
+    
+    % Convert to hours and add buffer
+    scheduleStartHour = (scheduleStart - 60) / 60;  % 1 hour before
+    scheduleEndHour = (scheduleEnd + 60) / 60;      % 1 hour after
+else
+    scheduleStartHour = timeRange(1) / 60;
+    scheduleEndHour = timeRange(2) / 60;
 end
 
 % Create figure with subplots
-fig = figure('Name', 'EP Lab Schedule Analysis', ...
+fig = figure('Name', 'EP Lab Schedule Visualization', ...
     'Position', [100, 100, figSize(1), figSize(2)], ...
     'Color', 'white');
 
-% Determine layout based on whether historical comparison is requested
-if showHistorical
-    % Side-by-side layout: Historical (left), Optimized (right), Operator timelines (bottom)
-    ax_hist = subplot(3, 2, [1 3], 'Parent', fig, 'Color', 'white'); % Historical - left column
-    hold(ax_hist, 'on');
-    ax_opt = subplot(3, 2, [2 4], 'Parent', fig, 'Color', 'white'); % Optimized - right column
-    hold(ax_opt, 'on');
-    ax_operators = subplot(3, 2, [5 6], 'Parent', fig, 'Color', 'white'); % Operators - bottom row
-    
-    % Store both axes
-    ax = ax_opt; % Main axis for compatibility
-    
-    if debugMode
-        fprintf('Creating side-by-side historical vs optimized comparison\n');
-    end
-else
-    % Original layout: Lab Gantt chart (top, larger), Operator timelines (bottom, smaller)
-    ax1 = subplot(3, 1, [1 2], 'Parent', fig, 'Color', 'white'); % Takes up 2/3 of the space
-    hold(ax1, 'on');
-    
-    % Store the main axes reference for compatibility
-    ax = ax1;
-    ax_operators = subplot(3, 1, 3, 'Parent', fig, 'Color', 'white'); % Takes up 1/3 of the space
+% Main Gantt chart (top 2/3)
+ax1 = subplot(3, 1, [1 2], 'Parent', fig, 'Color', 'white');
+hold(ax1, 'on');
+
+% Operator timeline (bottom 1/3)
+ax2 = subplot(3, 1, 3, 'Parent', fig, 'Color', 'white');
+hold(ax2, 'on');
+
+if debugMode
+    fprintf('Creating Gantt chart for %d cases across %d labs...\n', length(allCases), numLabs);
 end
 
-fprintf('Creating Gantt chart for %d cases across %d labs...\n', length(schedule), numLabs);
+% Set up axes limits and time labels first
+set(ax1, 'YDir', 'reverse'); % Earliest time at top
+ylim(ax1, [scheduleStartHour, scheduleEndHour]);
+xlim(ax1, [0.5, numLabs + 0.5]);
+
+% Create time labels (every hour)
+timeStart_hour = floor(scheduleStartHour);
+timeEnd_hour = ceil(scheduleEndHour);
+hourTicks = timeStart_hour:1:timeEnd_hour;
+
+% Add grid lines BEFORE drawing rectangles so they appear behind
+xlimits = xlim(ax1);
+for h = hourTicks
+    line(ax1, xlimits, [h, h], 'Color', [0.8, 0.8, 0.8], 'LineStyle', '-', ...
+        'LineWidth', 0.5, 'HandleVisibility', 'off');
+end
+
+% Define colors
+grayColor = [0.7, 0.7, 0.7];           % Setup/post time
+turnoverColor = [0.9, 0.9, 0.5];       % Turnover time
+idleColor = [0.95, 0.95, 0.95];        % Lab idle time
 
 % Draw schedule bars for each case
-for i = 1:length(schedule)
-    case_item = schedule(i);
-    lab = case_item.lab;
+for i = 1:length(allCases)
+    caseItem = allCases(i);
+    lab = caseItem.lab;
     
-    % Convert times to numeric values for plotting (hours since midnight)
-    setupStart_num = str2double(datestr(case_item.setupStart, 'HH')) + str2double(datestr(case_item.setupStart, 'MM'))/60;
-    procStart_num = str2double(datestr(case_item.procStart, 'HH')) + str2double(datestr(case_item.procStart, 'MM'))/60;
-    procEnd_num = str2double(datestr(case_item.procEnd, 'HH')) + str2double(datestr(case_item.procEnd, 'MM'))/60;
-    postEnd_num = str2double(datestr(case_item.postEnd, 'HH')) + str2double(datestr(case_item.postEnd, 'MM'))/60;
+    % Convert times to hours for plotting
+    setupStart_hour = caseItem.startTime / 60;
+    procStart_hour = caseItem.procStartTime / 60;
+    procEnd_hour = caseItem.procEndTime / 60;
+    
+    % Calculate end times
+    postEnd_hour = (caseItem.procEndTime + caseItem.postTime) / 60;
+    if isfield(caseItem, 'turnoverTime') && showTurnover
+        turnoverEnd_hour = (caseItem.procEndTime + caseItem.postTime + caseItem.turnoverTime) / 60;
+    else
+        turnoverEnd_hour = postEnd_hour;
+    end
     
     % Get operator color
-    operatorColor = operatorColorMap(case_item.operator);
-    grayColor = [0.7, 0.7, 0.7];
+    operatorColor = operatorColorMap(caseItem.operator);
     
     % Bar parameters
     barWidth = 0.8;
     xPos = lab;
     
     % Draw setup time (gray)
-    setupDuration = procStart_num - setupStart_num;
+    setupDuration = procStart_hour - setupStart_hour;
     if setupDuration > 0
-        rectangle(ax, 'Position', [xPos - barWidth/2, setupStart_num, barWidth, setupDuration], ...
+        rectangle(ax1, 'Position', [xPos - barWidth/2, setupStart_hour, barWidth, setupDuration], ...
             'FaceColor', grayColor, 'EdgeColor', 'black', 'LineWidth', 0.5);
     end
     
     % Draw procedure time (operator color)
-    procDuration = procEnd_num - procStart_num;
-    rectangle(ax, 'Position', [xPos - barWidth/2, procStart_num, barWidth, procDuration], ...
+    procDuration = procEnd_hour - procStart_hour;
+    rectangle(ax1, 'Position', [xPos - barWidth/2, procStart_hour, barWidth, procDuration], ...
         'FaceColor', operatorColor, 'EdgeColor', 'black', 'LineWidth', 1);
     
     % Draw post-procedure time (gray)
-    postDuration = postEnd_num - procEnd_num;
+    postDuration = postEnd_hour - procEnd_hour;
     if postDuration > 0
-        rectangle(ax, 'Position', [xPos - barWidth/2, procEnd_num, barWidth, postDuration], ...
+        rectangle(ax1, 'Position', [xPos - barWidth/2, procEnd_hour, barWidth, postDuration], ...
             'FaceColor', grayColor, 'EdgeColor', 'black', 'LineWidth', 0.5);
+    end
+    
+    % Draw turnover time (yellow) if enabled and exists
+    if showTurnover && isfield(caseItem, 'turnoverTime') && caseItem.turnoverTime > 0
+        turnoverDuration = turnoverEnd_hour - postEnd_hour;
+        if turnoverDuration > 0
+            rectangle(ax1, 'Position', [xPos - barWidth/2, postEnd_hour, barWidth, turnoverDuration], ...
+                'FaceColor', turnoverColor, 'EdgeColor', 'black', 'LineWidth', 0.5);
+        end
     end
     
     % Add case label if requested
     if showLabels
         % Place label in the middle of the procedure time
-        labelY = procStart_num + procDuration/2;
+        labelY = procStart_hour + procDuration/2;
         labelX = xPos;
         
-        % Extract last name only from operator name
-        % Handle cases like "LAST1 LAST2, FIRST" - use the second last name (LAST2)
-        commaParts = strsplit(case_item.operator, ',');
-        if length(commaParts) >= 1
-            lastNamePart = strtrim(commaParts{1}); % Everything before the comma
-            spaceParts = strsplit(lastNamePart, ' ');
-            if length(spaceParts) >= 2
-                lastName = spaceParts{2}; % Second last name (e.g., GHAZVINI from MONIREDDIN GHAZVINI)
+        % Extract last name from operator (handle various name formats)
+        operatorName = caseItem.operator;
+        
+        % Handle formats like "LAST, FIRST" or "FIRST LAST" or "FIRST MIDDLE LAST"
+        if contains(operatorName, ',')
+            % Format: "LAST, FIRST" - take everything before comma
+            nameParts = strsplit(operatorName, ',');
+            lastNamePart = strtrim(nameParts{1});
+            % Handle multiple last names like "SMITH JONES"
+            lastNameWords = strsplit(lastNamePart, ' ');
+            if length(lastNameWords) > 1
+                lastName = lastNameWords{end}; % Take the last word
             else
-                lastName = spaceParts{1}; % Single last name
+                lastName = lastNamePart;
             end
         else
-            lastName = case_item.operator; % Fallback to full name
-        end
-        
-        % Determine admission status indicator
-        admissionIndicator = '';
-        if isfield(case_item, 'admissionStatus') && ~isempty(case_item.admissionStatus)
-            status = case_item.admissionStatus;
-            if strcmpi(status, 'Hospital Outpatient Surgery (Amb Proc)') || strcmpi(status, 'Hospital Outpatient Surgery')
-                admissionIndicator = ' (OP)';
-            elseif strcmpi(status, 'Inpatient') || strcmpi(status, 'Inpatient Pediatric') || strcmpi(status, 'Observation') || strcmpi(status, 'ip') || strcmpi(status, 'in')
-                admissionIndicator = ' (IP)';
+            % Format: "FIRST LAST" or "FIRST MIDDLE LAST"
+            nameParts = strsplit(operatorName, ' ');
+            if length(nameParts) > 1
+                lastName = nameParts{end}; % Take the last word
+            else
+                lastName = operatorName; % Single name
             end
         end
         
-        % Create label text with admission status indicator
-        labelText = sprintf('%s%s\n%s', case_item.caseID, admissionIndicator, lastName);
+        % Create label text with case ID and last name
+        labelText = sprintf('%s\n%s', caseItem.caseID, lastName);
         
-        text(ax, labelX, labelY, labelText, ...
+        text(ax1, labelX, labelY, labelText, ...
             'HorizontalAlignment', 'center', ...
             'VerticalAlignment', 'middle', ...
             'FontSize', fontSize, ...
@@ -203,200 +232,83 @@ for i = 1:length(schedule)
     end
 end
 
-% Format axes
-set(ax, 'YDir', 'reverse'); % Earliest time at top
-
-% Set time range - convert to hours since midnight
-timeStart_num = str2double(datestr(timeRange(1), 'HH')) + str2double(datestr(timeRange(1), 'MM'))/60;
-timeEnd_num = str2double(datestr(timeRange(2), 'HH')) + str2double(datestr(timeRange(2), 'MM'))/60;
-
-% Handle cases that go past midnight (add 24 hours)
-if timeEnd_num < timeStart_num
-    timeEnd_num = timeEnd_num + 24;
-end
-
-% Ensure valid range
-if timeStart_num >= timeEnd_num
-    timeEnd_num = timeStart_num + 1; % At least 1 hour range
-end
-
-% Debug output to verify time range
-if debugMode
-    fprintf('Time range: %.2f to %.2f hours (%.1f hour span)\n', ...
-        timeStart_num, timeEnd_num, timeEnd_num - timeStart_num);
-    fprintf('Schedule times: %s to %s\n', ...
-        datestr(timeRange(1), 'HH:MM'), datestr(timeRange(2), 'HH:MM'));
-end
-
-ylim(ax, [timeStart_num, timeEnd_num]);
-
-% Set lab range
-xlim(ax, [min(labs) - 0.5, max(labs) + 0.5]);
-
-% Create time labels (every hour from 7 AM)
-timeStart_hour = floor(timeStart_num); % Start from actual start time  
-timeEnd_hour = ceil(timeEnd_num);
-
-% Generate hourly ticks
-hourTicks = timeStart_hour:1:timeEnd_hour;
+% Finish formatting main axes with labels
 hourLabels = cell(length(hourTicks), 1);
 for i = 1:length(hourTicks)
     hour = hourTicks(i);
     displayHour = mod(hour, 24);
-    
     if hour >= 24
-        hourLabels{i} = sprintf('%02d:00 (+1)', displayHour); % Next day indicator
+        hourLabels{i} = sprintf('%02d:00 (+1)', displayHour);
     else
         hourLabels{i} = sprintf('%02d:00', displayHour);
     end
 end
 
-yticks(ax, hourTicks);
-yticklabels(ax, hourLabels);
+yticks(ax1, hourTicks);
+yticklabels(ax1, hourLabels);
+ax1.XAxis.Color = 'black';
+ax1.YAxis.Color = 'black';
 
-% Add custom gray horizontal lines at each hour (behind cases)
-xlimits = xlim(ax);
-gridLines = [];
-for h = hourTicks
-    gridLine = line(ax, xlimits, [h, h], 'Color', [0.8, 0.8, 0.8], 'LineStyle', '-', ...
-        'LineWidth', 0.5, 'HandleVisibility', 'off');
-    gridLines(end+1) = gridLine;
+% Lab labels
+xticks(ax1, 1:numLabs);
+labLabels = cell(numLabs, 1);
+for i = 1:numLabs
+    labLabels{i} = sprintf('Lab %d', i);
 end
-% Send grid lines to back
-for i = 1:length(gridLines)
-    uistack(gridLines(i), 'bottom');
-end
+xticklabels(ax1, labLabels);
 
-% Map physical labs to display labels (Lab 1, Lab 2, Lab 10, Lab 11, Lab 14)
-labDisplayMap = [1, 2, 10, 11, 14]; % Fixed lab numbers to display
-displayLabs = cell(length(labs), 1);
-for i = 1:length(labs)
-    if i <= length(labDisplayMap)
-        displayLabs{i} = sprintf('Lab %d', labDisplayMap(i));
-    else
-        displayLabs{i} = sprintf('Lab %d', labs(i)); % Fallback for extra labs
-    end
-end
+% Add title and formatting
+title(ax1, chartTitle, 'FontSize', 16, 'FontWeight', 'bold', 'Color', 'black');
+xlabel(ax1, '');  % No x-label for main chart
+ylabel(ax1, 'Time of Day', 'Color', 'black');
 
-% Remove x-axis ticks and labels from main chart
-xticks(ax, []); % Remove x-axis ticks entirely
-
-% Add lab column headers inside the plot box (near top)
-yTop = timeStart_num + 0.5; % Position inside plot, near top
-for i = 1:length(labs)
-    text(ax, labs(i), yTop, displayLabs{i}, ...
-        'HorizontalAlignment', 'center', ...
-        'VerticalAlignment', 'middle', ...
-        'FontSize', fontSize + 2, ...
-        'FontWeight', 'bold', ...
-        'Color', 'black', ...
-        'BackgroundColor', [1, 1, 1, 0.9]); % White background for visibility
-    if debugMode
-        fprintf('Added lab header "%s" at position (%d, %.1f)\n', displayLabs{i}, labs(i), yTop);
-    end
-end
-
-if debugMode
-    fprintf('Applied changes:\n');
-    fprintf('  - Removed x-axis labels (empty xticklabels)\n');
-    fprintf('  - Added lab headers: %s\n', strjoin(displayLabs, ', '));
-    fprintf('  - Time range adjusted to: %.2f to %.2f hours\n', timeStart_num, timeEnd_num);
-end
-
-% No axis labels
-
-% Grid lines will be added before drawing cases
-
-% Set axis colors and add bounding box (no default grid to avoid conflicts)
-set(ax, 'XColor', 'black', 'YColor', 'black', 'Box', 'on', 'LineWidth', 1);
-
-% No legend - removed as requested
-
-% Add summary text
-summaryText = sprintf('Cases: %d | Labs: %d | Operators: %d', ...
-    length(schedule), numLabs, length(operators));
-
-% Calculate schedule span
-scheduleSpan = timeEnd_num - timeStart_num;
-if scheduleSpan > 0
-    summaryText = [summaryText, sprintf(' | Span: %.1f hrs', scheduleSpan)];
-end
-
-% Determine automatic title based on context
-if strcmp(chartTitle, 'EP Lab Schedule') % Default title, so auto-determine
-    if showHistorical
-        autoTitle = 'Historical EP Lab Schedule';
-    else
-        autoTitle = 'Simulated EP Lab Schedule';
-    end
-else
-    autoTitle = chartTitle; % Use user-provided title
-end
-
-% Add title in standard location
-title(ax, autoTitle, 'FontSize', 16, 'FontWeight', 'bold', 'Color', 'black');
-
-% Add summary annotation in bottom right corner
-xlimits = xlim(ax);
-ylimits = ylim(ax);
-text(ax, xlimits(2) - 0.1, ylimits(2) - 0.2, summaryText, ...
-    'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
-    'FontSize', 12, 'FontWeight', 'normal', 'Color', [0.4, 0.4, 0.4], ...
-    'BackgroundColor', [1, 1, 1, 0.8]); % Semi-transparent white background
+% Add summary statistics
+summaryText = sprintf('Cases: %d | Labs: %d | Operators: %d | Makespan: %.1f hrs', ...
+    length(allCases), numLabs, numOperators, results.makespan/60);
 
 % Add 6 PM line if relevant
-sixPM_num = 18.0; % 6 PM = 18:00
-if sixPM_num >= timeStart_num && sixPM_num <= timeEnd_num
-    line(xlim, [sixPM_num, sixPM_num], 'Color', 'red', 'LineStyle', '--', ...
+sixPM_hour = 18.0;
+if sixPM_hour >= scheduleStartHour && sixPM_hour <= scheduleEndHour
+    line(ax1, xlimits, [sixPM_hour, sixPM_hour], 'Color', 'red', 'LineStyle', '--', ...
         'LineWidth', 2, 'DisplayName', '6 PM Cutoff');
-    
-    % Add 6 PM label
-    text(max(xlim) - 0.1, sixPM_num + 0.1, '6 PM', ...
+    text(ax1, max(xlimits) - 0.1, sixPM_hour + 0.1, '6 PM', ...
         'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
         'FontSize', 10, 'FontWeight', 'bold', 'Color', 'red');
 end
 
-hold(ax, 'off');
+% Add summary text
+text(ax1, max(xlimits) - 0.1, max(ylim(ax1)) - 0.2, summaryText, ...
+    'HorizontalAlignment', 'right', 'VerticalAlignment', 'bottom', ...
+    'FontSize', 10, 'Color', [0.4, 0.4, 0.4], ...
+    'BackgroundColor', [1, 1, 1, 0.8]);
+
+hold(ax1, 'off');
 
 %% ===== OPERATOR TIMELINE SUBPLOT =====
 
-% Create second subplot for operator timelines
-ax2 = subplot(3, 1, 3, 'Parent', fig, 'Color', 'white'); % Takes up 1/3 of the space
-hold(ax2, 'on');
-
-fprintf('Creating operator timeline chart...\n');
-
-% Calculate operator schedules and idle times
-operatorData = calculateOperatorTimelines(schedule, timeRange, debugMode);
+% Calculate operator schedules
+operatorData = calculateOptimizedOperatorTimelines(schedule, uniqueOperators, scheduleStartHour, scheduleEndHour, debugMode);
 
 % Plot operator timelines
-plotOperatorTimelines(ax2, operatorData, operatorColorMap, timeRange, fontSize, debugMode);
+plotOptimizedOperatorTimelines(ax2, operatorData, operatorColorMap, scheduleStartHour, scheduleEndHour, fontSize, debugMode);
 
 hold(ax2, 'off');
 
 % Display summary statistics
-fprintf('\nSchedule Visualization Summary:\n');
-fprintf('  Total cases plotted: %d\n', length(schedule));
-fprintf('  Labs used: %s\n', mat2str(labs));
-fprintf('  Operators: %d (%s)\n', length(operators), strjoin(operators, ', '));
-fprintf('  Time span: %s to %s\n', ...
-    datestr(timeRange(1), 'HH:MM'), datestr(timeRange(2), 'HH:MM'));
+fprintf('\nOptimized Schedule Visualization Summary:\n');
+fprintf('  Total cases plotted: %d\n', length(allCases));
+fprintf('  Labs used: %d\n', numLabs);
+fprintf('  Operators: %d (%s)\n', numOperators, strjoin(uniqueOperators, ', '));
+fprintf('  Makespan: %.1f hours\n', results.makespan/60);
+fprintf('  Mean lab utilization: %.1f%%\n', results.meanLabUtilization*100);
+fprintf('  Total operator idle time: %.1f hours\n', results.totalOperatorIdleTime/60);
+fprintf('  Total operator overtime: %.1f hours\n', results.totalOperatorOvertime/60);
 
 % Check for overtime cases
 overtimeCases = 0;
-for i = 1:length(schedule)
-    try
-        caseEndTime = schedule(i).postEnd;
-        if isdatetime(caseEndTime)
-            % Use datestr and str2double as alternative to hour() function
-            hourStr = datestr(caseEndTime, 'HH');
-            endHour = str2double(hourStr);
-            if endHour >= 18 % After 6 PM
-                overtimeCases = overtimeCases + 1;
-            end
-        end
-    catch ME
-        fprintf('Warning: Could not process end time for case %d: %s\n', i, ME.message);
+for i = 1:length(allCases)
+    if allCases(i).endTime/60 >= 18 % After 6 PM
+        overtimeCases = overtimeCases + 1;
     end
 end
 
@@ -404,68 +316,64 @@ if overtimeCases > 0
     fprintf('  WARNING: %d cases extend past 6 PM\n', overtimeCases);
 end
 
-fprintf('Schedule visualization created successfully!\n');
+fprintf('Optimized schedule visualization created successfully!\n');
 
 end
 
-%% ===== HELPER FUNCTIONS FOR OPERATOR TIMELINES =====
+%% ===== HELPER FUNCTIONS =====
 
-function operatorData = calculateOperatorTimelines(schedule, timeRange, debugMode)
-% Calculate timeline data for each operator including idle times between cases only
+function operatorData = calculateOptimizedOperatorTimelines(schedule, uniqueOperators, scheduleStartHour, scheduleEndHour, debugMode)
+% Calculate timeline data for each operator from optimized schedule
 
-if isempty(schedule)
-    operatorData = struct();
-    return;
-end
-
-% Get unique operators
-operators = unique({schedule.operator});
 operatorData = struct();
 
-for i = 1:length(operators)
-    op = operators{i};
+for i = 1:length(uniqueOperators)
+    op = uniqueOperators{i};
     
-    % Create valid field name by removing invalid characters
+    % Create valid field name
     fieldName = matlab.lang.makeValidName(op);
     
-    % Get all cases for this operator
-    opCases = schedule(strcmp({schedule.operator}, op));
+    % Get all cases for this operator across all labs
+    opCases = [];
+    for j = 1:length(schedule.labs)
+        if ~isempty(schedule.labs{j})
+            labCases = schedule.labs{j};
+            for k = 1:length(labCases)
+                if strcmp(labCases(k).operator, op)
+                    caseInfo = labCases(k);
+                    caseInfo.lab = j;
+                    opCases = [opCases; caseInfo];
+                end
+            end
+        end
+    end
     
     if isempty(opCases)
         continue;
     end
     
-    % Sort cases by start time
-    [~, sortIdx] = sort([opCases.setupStart]);
+    % Sort cases by procedure start time
+    [~, sortIdx] = sort([opCases.procStartTime]);
     opCases = opCases(sortIdx);
     
-    % Calculate working periods and idle periods
+    % Calculate working periods and idle periods (convert to hours)
     workingPeriods = [];
     idlePeriods = [];
     totalIdleTime = 0;
     
-    dayStart = timeRange(1);
-    dayEnd = timeRange(2);
-    
     for j = 1:length(opCases)
-        % For idle time calculation, only consider procedure time (not setup/post/turnover)
-        procStart = opCases(j).procStart;
-        procEnd = opCases(j).procEnd;
+        procStart_hour = opCases(j).procStartTime / 60;
+        procEnd_hour = opCases(j).procEndTime / 60;
         
-        % Convert to numeric hours for calculations
-        procStart_num = str2double(datestr(procStart, 'HH')) + str2double(datestr(procStart, 'MM'))/60;
-        procEnd_num = str2double(datestr(procEnd, 'HH')) + str2double(datestr(procEnd, 'MM'))/60;
+        workingPeriods(end+1,:) = [procStart_hour, procEnd_hour];
         
-        workingPeriods(end+1,:) = [procStart_num, procEnd_num];
-        
-        % Calculate idle time between procedure end and next procedure start only
+        % Calculate idle time between procedure end and next procedure start
         if j > 1
-            % Idle time between procedure end and next procedure start
-            prevProcEnd_num = workingPeriods(j-1, 2);
-            if procStart_num > prevProcEnd_num
-                idleTime = procStart_num - prevProcEnd_num;
+            prevProcEnd_hour = workingPeriods(j-1, 2);
+            if procStart_hour > prevProcEnd_hour
+                idleTime = procStart_hour - prevProcEnd_hour;
                 if idleTime > 0.05 % Only count gaps > 3 minutes
-                    idlePeriods(end+1,:) = [prevProcEnd_num, procStart_num];
+                    idlePeriods(end+1,:) = [prevProcEnd_hour, procStart_hour];
                     totalIdleTime = totalIdleTime + idleTime;
                 end
             end
@@ -478,7 +386,7 @@ for i = 1:length(operators)
     lastCaseEnd = max(workingPeriods(:,2));
     totalSpan = lastCaseEnd - firstCaseStart;
     
-    % Store operator data using valid field name
+    % Store operator data
     operatorData.(fieldName) = struct(...
         'originalName', op, ...
         'cases', opCases, ...
@@ -498,8 +406,8 @@ end
 
 end
 
-function plotOperatorTimelines(ax, operatorData, operatorColorMap, timeRange, fontSize, debugMode)
-% Plot operator timeline chart with idle time highlighting
+function plotOptimizedOperatorTimelines(ax, operatorData, operatorColorMap, scheduleStartHour, scheduleEndHour, fontSize, debugMode)
+% Plot operator timeline chart for optimized schedule
 
 fieldNames = fieldnames(operatorData);
 if isempty(fieldNames)
@@ -515,10 +423,10 @@ idleEdgeColor = [0.7, 0.7, 0.7]; % Darker gray edge
 for i = 1:numOperators
     fieldName = fieldNames{i};
     opData = operatorData.(fieldName);
-    originalName = opData.originalName; % Get the original operator name
+    originalName = opData.originalName;
     yPos = i;
     
-    % Get operator color using original name
+    % Get operator color
     if isKey(operatorColorMap, originalName)
         opColor = operatorColorMap(originalName);
     else
@@ -535,13 +443,12 @@ for i = 1:numOperators
             'FaceColor', opColor, 'EdgeColor', 'black', 'LineWidth', 1);
     end
     
-    % Plot idle periods (gray bars with pattern)
+    % Plot idle periods (gray bars)
     for j = 1:size(opData.idlePeriods, 1)
         idleStart = opData.idlePeriods(j, 1);
         idleEnd = opData.idlePeriods(j, 2);
         idleDuration = idleEnd - idleStart;
         
-        % Draw idle period as hatched rectangle
         rectangle('Position', [idleStart, yPos - barHeight/2, idleDuration, barHeight], ...
             'FaceColor', idleColor, 'EdgeColor', idleEdgeColor, 'LineWidth', 1, ...
             'LineStyle', '--');
@@ -559,20 +466,6 @@ for i = 1:numOperators
         end
     end
     
-    % Extract last name for consistency (actual labels are set below)
-    commaParts = strsplit(originalName, ',');
-    if length(commaParts) >= 1
-        lastNamePart = strtrim(commaParts{1});
-        spaceParts = strsplit(lastNamePart, ' ');
-        if length(spaceParts) >= 2
-            lastName = spaceParts{2}; % Second last name
-        else
-            lastName = spaceParts{1}; % Single last name
-        end
-    else
-        lastName = originalName; % Fallback
-    end
-    
     % Add total idle time annotation at the end
     if opData.totalIdleTime > 0.05
         totalIdleText = sprintf('Total Idle: %.1fh', opData.totalIdleTime);
@@ -587,83 +480,50 @@ for i = 1:numOperators
 end
 
 % Format axes
-set(ax, 'YDir', 'normal'); % Normal direction (bottom to top)
+set(ax, 'YDir', 'normal');
+xlim(ax, [scheduleStartHour, scheduleEndHour + 2]); % Extra space for annotations
+ylim(ax, [0.5, numOperators + 0.5]);
 
-% Set time range
-timeStart_num = str2double(datestr(timeRange(1), 'HH')) + str2double(datestr(timeRange(1), 'MM'))/60;
-timeEnd_num = str2double(datestr(timeRange(2), 'HH')) + str2double(datestr(timeRange(2), 'MM'))/60;
-
-% Handle cases that go past midnight
-if timeEnd_num < timeStart_num
-    timeEnd_num = timeEnd_num + 24;
-end
-
-xlim([timeStart_num, timeEnd_num + 2]); % Extra space for annotations
-ylim([0.5, numOperators + 0.5]);
-
-% Create operator labels with disambiguation for duplicate last names
+% Create operator labels (extract last names)
 operatorLabels = cell(numOperators, 1);
-
-% First pass: extract last names
-lastNames = cell(numOperators, 1);
-originalNames = cell(numOperators, 1);
 for i = 1:numOperators
     fieldName = fieldNames{i};
     originalName = operatorData.(fieldName).originalName;
-    originalNames{i} = originalName;
     
-    commaParts = strsplit(originalName, ',');
-    if length(commaParts) >= 1
-        lastNamePart = strtrim(commaParts{1});
-        spaceParts = strsplit(lastNamePart, ' ');
-        if length(spaceParts) >= 2
-            lastNames{i} = spaceParts{2}; % Second last name
+    % Extract last name (same logic as top plot)
+    if contains(originalName, ',')
+        % Format: "LAST, FIRST" - take everything before comma
+        nameParts = strsplit(originalName, ',');
+        lastNamePart = strtrim(nameParts{1});
+        % Handle multiple last names like "SMITH JONES"
+        lastNameWords = strsplit(lastNamePart, ' ');
+        if length(lastNameWords) > 1
+            operatorLabels{i} = lastNameWords{end}; % Take the last word
         else
-            lastNames{i} = spaceParts{1}; % Single last name
+            operatorLabels{i} = lastNamePart;
         end
     else
-        lastNames{i} = originalName; % Fallback
+        % Format: "FIRST LAST" or "FIRST MIDDLE LAST"
+        nameParts = strsplit(originalName, ' ');
+        if length(nameParts) > 1
+            operatorLabels{i} = nameParts{end}; % Take the last word
+        else
+            operatorLabels{i} = originalName; % Single name
+        end
     end
 end
 
-% Second pass: add first names/initials for duplicates
-for i = 1:numOperators
-    lastName = lastNames{i};
-    
-    % Check if this last name appears multiple times
-    duplicateIndices = find(strcmp(lastNames, lastName));
-    
-    if length(duplicateIndices) > 1
-        % Add full first name for disambiguation
-        originalName = originalNames{i};
-        commaParts = strsplit(originalName, ',');
-        if length(commaParts) >= 2
-            firstNamePart = strtrim(commaParts{2});
-            if ~isempty(firstNamePart)
-                operatorLabels{i} = sprintf('%s, %s', lastName, firstNamePart); % Last name + full first name
-            else
-                operatorLabels{i} = lastName;
-            end
-        else
-            operatorLabels{i} = lastName;
-        end
-    else
-        operatorLabels{i} = lastName; % No duplicates, use last name only
-    end
-end
-
-yticks(1:numOperators);
-yticklabels(operatorLabels);
+yticks(ax, 1:numOperators);
+yticklabels(ax, operatorLabels);
 
 % Time ticks (same as main chart)
-timeStart_hour = floor(timeStart_num);
-timeEnd_hour = ceil(timeEnd_num);
+timeStart_hour = floor(scheduleStartHour);
+timeEnd_hour = ceil(scheduleEndHour);
 hourTicks = timeStart_hour:1:timeEnd_hour;
 hourLabels = cell(length(hourTicks), 1);
 for i = 1:length(hourTicks)
     hour = hourTicks(i);
     displayHour = mod(hour, 24);
-    
     if hour >= 24
         hourLabels{i} = sprintf('%02d:00 (+1)', displayHour);
     else
@@ -671,23 +531,24 @@ for i = 1:length(hourTicks)
     end
 end
 
-xticks(hourTicks);
-xticklabels(hourLabels);
+xticks(ax, hourTicks);
+xticklabels(ax, hourLabels);
 
 % Labels and formatting
-xlabel('Time of Day');
-% ylabel removed as requested
-title('Operator Utilization Timeline (Gray = Idle Time)', ...
-    'FontSize', 16, 'FontWeight', 'bold', 'Color', 'black');
+xlabel(ax, 'Time of Day', 'Color', 'black');
+title(ax, 'Operator Utilization Timeline', ...
+    'FontSize', 14, 'FontWeight', 'bold', 'Color', 'black');
 
 % Add grid and formatting
-grid on;
+grid(ax, 'on');
 set(ax, 'GridAlpha', 0.3, 'XColor', 'black', 'YColor', 'black', 'Box', 'on', 'LineWidth', 1);
+ax.XAxis.Color = 'black';
+ax.YAxis.Color = 'black';
 
 % Add 6 PM line if relevant
-sixPM_num = 18.0;
-if sixPM_num >= timeStart_num && sixPM_num <= timeEnd_num
-    line([sixPM_num, sixPM_num], ylim, 'Color', 'red', 'LineStyle', '--', ...
+sixPM_hour = 18.0;
+if sixPM_hour >= scheduleStartHour && sixPM_hour <= scheduleEndHour
+    line(ax, [sixPM_hour, sixPM_hour], ylim(ax), 'Color', 'red', 'LineStyle', '--', ...
         'LineWidth', 1, 'DisplayName', '6 PM Cutoff');
 end
 

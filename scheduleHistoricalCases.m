@@ -65,7 +65,7 @@ end
 if ~strcmp(caseFilter, 'all')
     originalCaseCount = length(cases);
     if strcmp(caseFilter, 'outpatient')
-        cases = cases(strcmp({cases.admissionStatus}, 'Outpatient') | cellfun(@isempty, {cases.admissionStatus}));
+        cases = cases(strcmp({cases.admissionStatus}, 'Hospital Outpatient Surgery (Amb Proc)') | cellfun(@isempty, {cases.admissionStatus}));
     elseif strcmp(caseFilter, 'inpatient')
         cases = cases(strcmp({cases.admissionStatus}, 'Inpatient'));
     end
