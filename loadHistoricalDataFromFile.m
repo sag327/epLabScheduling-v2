@@ -1,22 +1,37 @@
-function historicalData = loadHistoricalDataFromFile(varargin)
+function [historicalData, historicalSchedules] = loadHistoricalDataFromFile(varargin)
 % Creates a .mat file with cleaned historical data from Excel file
 % Converts column names to human-readable format
+% Also reconstructs actual historical schedules for each day
 %
 % Usage:
-%   createHistoricalDataMat()  % Uses default 'procedureDurationsB.xlsx'
-%   createHistoricalDataMat('path/to/mydata.xlsx')
-%   createHistoricalDataMat('FilePath', 'path/to/mydata.xlsx')
+%   historicalData = loadHistoricalDataFromFile()  % Uses default 'procedureDurationsB.xlsx'
+%   [historicalData, schedules] = loadHistoricalDataFromFile('path/to/mydata.xlsx')
+%   [historicalData, schedules] = loadHistoricalDataFromFile('FilePath', 'path/to/mydata.xlsx')
 %
 % Parameters:
 %   FilePath - Path to Excel file containing historical procedure data
 %              Default: 'procedureDurationsB.xlsx'
+%   CreateSchedules - Whether to reconstruct historical schedules (default: true)
+%   TurnoverTime - Estimated turnover time for historical schedules (default: 15 minutes)
+%   Debug - Show debug output during schedule reconstruction (default: false)
+%
+% Outputs:
+%   historicalData - Cleaned historical data structure
+%   historicalSchedules - Map containing reconstructed schedules for each date
+%                        (only returned if CreateSchedules is true)
 
 % Parse input arguments
 p = inputParser;
 addOptional(p, 'FilePath', 'procedureDurationsB.xlsx', @(x) ischar(x) || isstring(x));
+addParameter(p, 'CreateSchedules', true, @islogical);
+addParameter(p, 'TurnoverTime', 15, @(x) isnumeric(x) && x >= 0);
+addParameter(p, 'Debug', false, @islogical);
 parse(p, varargin{:});
 
 filename = char(p.Results.FilePath);
+createSchedules = p.Results.CreateSchedules;
+turnoverTime = p.Results.TurnoverTime;
+debugMode = p.Results.Debug;
 
 fprintf('Loading historical data from Excel file: %s\n', filename);
 
@@ -265,8 +280,137 @@ save('./data/historicalEPDataDescriptions.mat', 'fieldDescriptions');
 fprintf('Field descriptions saved to historicalEPDataDescriptions.mat\n');
 
 fprintf('\nData structure created successfully!\n');
-load('./data/historicalEPData.mat');
 
+% Reconstruct historical schedules if requested
+if createSchedules
+    fprintf('\n=== RECONSTRUCTING HISTORICAL SCHEDULES ===\n');
+    historicalSchedules = reconstructAllHistoricalSchedules(historicalData, turnoverTime, debugMode);
+    
+    % Save historical schedules to file
+    scheduleOutputFile = './data/historicalEPSchedules.mat';
+    save(scheduleOutputFile, 'historicalSchedules');
+    fprintf('Historical schedules saved to %s\n', scheduleOutputFile);
+    
+    % Generate and save lab mappings
+    fprintf('\nGenerating lab mappings...\n');
+    labMappings = getHistoricalLabMappings(historicalSchedules);
+else
+    historicalSchedules = containers.Map();
+end
+
+fprintf('\nData loading complete!\n');
+
+end
+
+%% Helper function to reconstruct all historical schedules
+function historicalSchedules = reconstructAllHistoricalSchedules(historicalData, turnoverTime, debugMode)
+    % Get unique dates
+    uniqueDates = unique(string(historicalData.date));
+    uniqueDates = uniqueDates(~ismissing(uniqueDates));
+    
+    fprintf('Reconstructing schedules for %d unique dates...\n', length(uniqueDates));
+    
+    % Initialize schedule storage
+    historicalSchedules = containers.Map();
+    
+    % Progress tracking
+    if ~debugMode
+        fprintf('Progress: [');
+        progressLength = 50;
+        lastProgress = 0;
+    end
+    
+    successCount = 0;
+    errorCount = 0;
+    
+    for i = 1:length(uniqueDates)
+        dateStr = char(uniqueDates(i));
+        
+        try
+            % Convert date format for reconstructHistoricalSchedule function
+            % From 'dd-mmm-yyyy' to 'MM-DD-YYYY'
+            dt = datetime(dateStr, 'InputFormat', 'dd-MMM-yyyy');
+            dateForFunction = sprintf('%02d-%02d-%04d', month(dt), day(dt), year(dt));
+            
+            % Reconstruct schedule for this date
+            [schedule, results] = reconstructHistoricalSchedule(historicalData, dateForFunction, ...
+                'TurnoverTime', turnoverTime, 'Debug', false);
+            
+            % Store schedule and results
+            scheduleData = struct();
+            scheduleData.schedule = schedule;
+            scheduleData.results = results;
+            scheduleData.date = dateStr;
+            scheduleData.numCases = results.totalCases;
+            
+            % Store lab mapping information
+            if isfield(schedule, 'labMapping')
+                scheduleData.labMapping = schedule.labMapping;
+                scheduleData.numLabs = schedule.numLabs;
+            end
+            
+            historicalSchedules(dateStr) = scheduleData;
+            successCount = successCount + 1;
+            
+            if debugMode
+                fprintf('  %s: %d cases, %.1f hour span\n', dateStr, results.totalCases, results.makespan/60);
+            end
+            
+        catch ME
+            if debugMode
+                fprintf('  Error processing %s: %s\n', dateStr, ME.message);
+            end
+            errorCount = errorCount + 1;
+        end
+        
+        % Update progress bar
+        if ~debugMode
+            progress = i / length(uniqueDates);
+            currentProgress = floor(progress * progressLength);
+            
+            for j = (lastProgress + 1):currentProgress
+                fprintf('=');
+            end
+            lastProgress = currentProgress;
+        end
+    end
+    
+    if ~debugMode
+        fprintf('] 100%%\n');
+    end
+    
+    fprintf('Schedule reconstruction complete!\n');
+    fprintf('  Successfully processed: %d dates\n', successCount);
+    if errorCount > 0
+        fprintf('  Errors: %d dates\n', errorCount);
+    end
+    
+    % Display summary statistics
+    if successCount > 0
+        fprintf('\nHistorical Schedule Summary:\n');
+        
+        % Calculate aggregate statistics
+        totalCases = 0;
+        totalSpanTime = 0;
+        datesWithOvertime = 0;
+        scheduleData = values(historicalSchedules);
+        
+        for i = 1:length(scheduleData)
+            data = scheduleData{i};
+            totalCases = totalCases + data.results.totalCases;
+            totalSpanTime = totalSpanTime + data.results.makespan;
+            
+            if data.results.scheduleEnd/60 > 18 % After 6 PM
+                datesWithOvertime = datesWithOvertime + 1;
+            end
+        end
+        
+        fprintf('  Total cases across all dates: %d\n', totalCases);
+        fprintf('  Average cases per day: %.1f\n', totalCases / successCount);
+        fprintf('  Average schedule span: %.1f hours\n', (totalSpanTime/60) / successCount);
+        fprintf('  Days with overtime (past 6 PM): %d (%.1f%%)\n', ...
+            datesWithOvertime, (datesWithOvertime / successCount) * 100);
+    end
 end
 
 function columnName = findColumnByName(availableColumns, possibleNames)
