@@ -139,7 +139,7 @@ end
 % Test 7: Edge case - empty cases
 fprintf('=== Test 7: Edge case - empty cases array ===\n');
 try
-    emptyCases = struct();
+    emptyCases = [];  % Use empty array instead of empty struct
     [scheduleEmpty, resultsEmpty] = scheduleHistoricalCases(emptyCases, 'verbose', false);
     fprintf('✓ Test 7 passed - handled empty cases\n\n');
 catch ME

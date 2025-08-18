@@ -25,7 +25,7 @@ function [schedule, results] = scheduleHistoricalCases(cases, varargin)
 
 % Parse input arguments
 p = inputParser;
-addRequired(p, 'cases', @isstruct);
+addRequired(p, 'cases', @(x) isstruct(x) || isempty(x));
 addParameter(p, 'numLabs', 5, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'labStartTimes', {'8:00', '8:00', '8:00','8:00','8:00'}, @iscell);
 addParameter(p, 'optimizationMetric', 'operatorIdle', @(x) ismember(x, {'operatorIdle', 'labIdle', 'makespan', 'operatorOvertime'}));
@@ -69,9 +69,35 @@ if ~strcmp(caseFilter, 'all')
 end
 
 if isempty(cases)
-    fprintf('No cases to schedule after filtering.\n');
+    if verbose
+        fprintf('No cases to schedule after filtering.\n');
+    end
+    
+    % Convert lab start times to minutes since midnight for empty case
+    labStartMinutes = zeros(numLabs, 1);
+    for i = 1:numLabs
+        timeStr = labStartTimes{i};
+        timeParts = split(timeStr, ':');
+        labStartMinutes(i) = str2double(timeParts{1}) * 60 + str2double(timeParts{2});
+    end
+    
     schedule = struct();
+    schedule.labs = cell(numLabs, 1);
+    schedule.operators = containers.Map();
     results = struct();
+    results.labUtilization = zeros(numLabs, 1);
+    results.meanLabUtilization = 0;
+    results.totalLabIdleTime = 0;
+    results.operatorIdleTime = [];
+    results.totalOperatorIdleTime = 0;
+    results.meanOperatorIdleTime = 0;
+    results.operatorOvertime = [];
+    results.totalOperatorOvertime = 0;
+    results.scheduleStart = min(labStartMinutes);
+    results.scheduleEnd = min(labStartMinutes);
+    results.makespan = 0;
+    results.optimizationMetric = optimizationMetric;
+    results.objectiveValue = 0;
     return;
 end
 
@@ -163,11 +189,25 @@ end
 numConstraint1 = numCases;  % Each case scheduled once
 numConstraint2 = numLabs * numTimeSlots;  % Lab capacity
 numConstraint3 = numOperators * numTimeSlots;  % Operator availability
-numConstraint4 = sum(cellfun(@(x) numCases * (numTimeSlots - length(x)), validTimeSlots));  % Lab start times
-numConstraint5 = numLabs - 1;  % Symmetry breaking
+
+% Constraint 4: Lab start time constraints (only invalid time slots)
+numConstraint4 = 0;
+for j = 1:numLabs
+    labStart = labStartMinutes(j);
+    invalidTimeSlots = find(timeSlots < labStart);
+    numConstraint4 = numConstraint4 + length(invalidTimeSlots) * sum(labPreferences(:, j));
+end
+numConstraint4 = max(0, numConstraint4);  % Ensure non-negative
+
+numConstraint5 = max(0, numLabs - 1);  % Symmetry breaking
+
 % Constraint 6 (priority) - estimate based on priority cases
 priorityCaseCount = sum(casePriorities == 1);
-numConstraint6 = priorityCaseCount * (numCases - priorityCaseCount) * numLabs * numTimeSlots^2 / 10;  % Conservative estimate
+if priorityCaseCount > 0
+    numConstraint6 = priorityCaseCount * (numCases - priorityCaseCount) * numLabs * 10;  % Conservative estimate
+else
+    numConstraint6 = 0;
+end
 
 totalConstraints = numConstraint1 + numConstraint2 + numConstraint3 + numConstraint4 + numConstraint5 + numConstraint6;
 totalEqConstraints = numConstraint1;
@@ -382,10 +422,9 @@ if verbose
     fprintf('Building constraint 4 (lab start times)...');
 end
 
-% Build constraint 4 with dynamic allocation to avoid counting errors
+% Build constraint 4 with proper vector handling
 constraint4Rows = [];
 constraint4Cols = [];
-constraintIdx = 0;
 
 for j = 1:numLabs
     labStart = labStartMinutes(j);
@@ -393,21 +432,31 @@ for j = 1:numLabs
     
     for i = 1:numCases
         if labPreferences(i, j) == 1
-            for t = invalidTimeSlots'
-                constraintIdx = constraintIdx + 1;
-                constraint4Rows = [constraint4Rows; constraintIdx];
-                constraint4Cols = [constraint4Cols; getVarIndex(i, j, t)];
+            % Add one constraint per invalid time slot
+            numInvalidSlots = length(invalidTimeSlots);
+            if numInvalidSlots > 0
+                % Add constraint indices (one per invalid slot)
+                startConstraintIdx = length(constraint4Rows) + 1;
+                endConstraintIdx = startConstraintIdx + numInvalidSlots - 1;
+                newRows = (startConstraintIdx:endConstraintIdx)';
+                
+                % Add variable indices
+                newCols = arrayfun(@(t) getVarIndex(i, j, t), invalidTimeSlots);
+                
+                constraint4Rows = [constraint4Rows; newRows];
+                constraint4Cols = [constraint4Cols; newCols(:)];
             end
         end
     end
 end
 
-if constraintIdx > 0
+if ~isempty(constraint4Rows)
     constraint4Values = ones(length(constraint4Rows), 1);
-    constraint4Matrix = sparse(constraint4Rows, constraint4Cols, constraint4Values, constraintIdx, numVars);
-    A(ineqRowIdx + (1:constraintIdx), :) = constraint4Matrix;
-    b(ineqRowIdx + (1:constraintIdx)) = 0;
-    ineqRowIdx = ineqRowIdx + constraintIdx;
+    numConstraint4 = max(constraint4Rows);
+    constraint4Matrix = sparse(constraint4Rows, constraint4Cols, constraint4Values, numConstraint4, numVars);
+    A(ineqRowIdx + (1:numConstraint4), :) = constraint4Matrix;
+    b(ineqRowIdx + (1:numConstraint4)) = 0;
+    ineqRowIdx = ineqRowIdx + numConstraint4;
 end
 
 if verbose
