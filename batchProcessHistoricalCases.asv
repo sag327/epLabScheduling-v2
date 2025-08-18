@@ -383,7 +383,6 @@ for i = 1:numDays
         dailyResults{i}.numCases = length(dayCases);
         dailyResults{i}.turnoverTime = turnoverTime;
         dailyResults{i}.caseFilter = caseFilter;
-        dailyResults{i}.operators = keys(schedule.operators);
         
     catch ME
         if debugMode
@@ -431,7 +430,7 @@ end
 
 % Calculate summary statistics
 fprintf('\nCalculating summary statistics...\n');
-summaryStats = calculateSummaryStats(dailyResults, dailySchedules);
+summaryStats = calculateSummaryStats(dailyResults);
 
 % Create final results structure
 batchResults = struct();
@@ -472,44 +471,15 @@ fprintf('  Average operator idle time: %.1f hours\n', summaryStats.avgOperatorId
 fprintf('  Days with overtime: %d (%.1f%%)\n', summaryStats.daysWithOvertime, ...
     (summaryStats.daysWithOvertime / successfulDays) * 100);
 
-% Display operator-specific statistics
-if isfield(summaryStats, 'operatorStats') && ~isempty(summaryStats.operatorStats)
-    fprintf('\n=== OPERATOR-SPECIFIC STATISTICS ===\n');
-    operatorFields = fieldnames(summaryStats.operatorStats);
-    
-    % Sort operators by total cases (descending)
-    operatorTotalCases = [];
-    for i = 1:length(operatorFields)
-        operatorTotalCases(i) = summaryStats.operatorStats.(operatorFields{i}).totalCases;
-    end
-    [~, sortIdx] = sort(operatorTotalCases, 'descend');
-    
-    for i = 1:length(sortIdx)
-        opField = operatorFields{sortIdx(i)};
-        opStats = summaryStats.operatorStats.(opField);
-        
-        fprintf('\n%s:\n', opStats.name);
-        fprintf('  Total cases: %d (%.1f cases/day avg)\n', opStats.totalCases, opStats.avgCasesPerDay);
-        fprintf('  Working days: %d\n', opStats.workingDays);
-        fprintf('  Work time: %.1f hrs total (%.1f hrs/day avg)\n', opStats.totalWorkTime, opStats.avgWorkTimePerDay);
-        fprintf('  Idle time: %.1f hrs total (%.1f hrs/day avg)\n', opStats.totalIdleTime, opStats.avgIdleTimePerDay);
-        fprintf('  Overtime: %.1f hrs total (%.1f hrs/day avg, %d days with OT)\n', ...
-            opStats.totalOvertime, opStats.avgOvertimePerDay, opStats.daysWithOvertime);
-        fprintf('  Efficiency: %.1f cases/hour, %.1f%% utilization\n', ...
-            opStats.avgCasesPerHour, opStats.utilizationRate * 100);
-    end
-end
-
 fprintf('\nResults saved to: %s\n', saveFile);
 fprintf('Batch processing complete!\n');
 
 end
 
 %% Helper function to calculate summary statistics
-function summaryStats = calculateSummaryStats(dailyResults, dailySchedules)
+function summaryStats = calculateSummaryStats(dailyResults)
     % Remove empty results
     validResults = dailyResults(~cellfun(@isempty, dailyResults));
-    validSchedules = dailySchedules(~cellfun(@isempty, dailySchedules));
     
     if isempty(validResults)
         summaryStats = struct();
@@ -557,251 +527,6 @@ function summaryStats = calculateSummaryStats(dailyResults, dailySchedules)
     summaryStats.makespan_p75 = prctile(makespans, 75);
     summaryStats.labUtil_p25 = prctile(labUtilizations, 25);
     summaryStats.labUtil_p75 = prctile(labUtilizations, 75);
-    
-    % Calculate operator-specific statistics
-    fprintf('  Calculating operator-specific statistics...\n');
-    summaryStats.operatorStats = calculateOperatorStats(validResults, validSchedules);
-end
-
-%% Helper function to calculate operator-specific statistics
-function operatorStats = calculateOperatorStats(dailyResults, dailySchedules)
-    % Initialize containers for each metric
-    operatorDailyData = containers.Map(); % operatorName -> Map(dateStr -> struct with detailed data)
-    
-    for dayIdx = 1:length(dailyResults)
-        dayResult = dailyResults{dayIdx};
-        daySchedule = dailySchedules{dayIdx};
-        
-        % Skip if no valid schedule
-        if ~isfield(daySchedule, 'labs') || isempty(daySchedule.labs)
-            continue;
-        end
-        
-        dayStr = dayResult.dateStr;
-        
-        % Collect all cases for each operator on this day
-        operatorCasesByDay = containers.Map();
-        
-        % Process each lab to find operator cases
-        for labIdx = 1:length(daySchedule.labs)
-            labCases = daySchedule.labs{labIdx};
-            if isempty(labCases)
-                continue;
-            end
-            
-            % Process each case in this lab
-            for caseIdx = 1:length(labCases)
-                caseInfo = labCases(caseIdx);
-                operatorName = caseInfo.operator;
-                
-                % Initialize operator if first time seeing them
-                if ~isKey(operatorCasesByDay, operatorName)
-                    operatorCasesByDay(operatorName) = struct('procStartTime', {}, 'procEndTime', {}, 'procTime', {}, 'lab', {});
-                end
-                
-                % Add case info with timing data
-                caseData = struct();
-                caseData.procStartTime = caseInfo.procStartTime;
-                caseData.procEndTime = caseInfo.procEndTime;
-                caseData.procTime = caseInfo.procTime;
-                caseData.lab = labIdx;
-                
-                operatorCases = operatorCasesByDay(operatorName);
-                if isempty(operatorCases)
-                    operatorCases = caseData;
-                else
-                    operatorCases(end+1) = caseData;
-                end
-                operatorCasesByDay(operatorName) = operatorCases;
-            end
-        end
-        
-        % Calculate daily statistics for each operator
-        operatorNames = keys(operatorCasesByDay);
-        for opIdx = 1:length(operatorNames)
-            operatorName = operatorNames{opIdx};
-            operatorCases = operatorCasesByDay(operatorName);
-            
-            % Initialize operator in main data structure
-            if ~isKey(operatorDailyData, operatorName)
-                operatorDailyData(operatorName) = containers.Map();
-            end
-            
-            % Calculate daily metrics
-            dailyMetrics = calculateOperatorDailyMetrics(operatorCases);
-            dailyMetrics.date = dayStr;
-            
-            % Store in main data structure
-            operatorMap = operatorDailyData(operatorName);
-            operatorMap(dayStr) = dailyMetrics;
-            operatorDailyData(operatorName) = operatorMap;
-        end
-    end
-    
-    % Calculate summary statistics for each operator
-    operatorNames = keys(operatorDailyData);
-    operatorStats = struct();
-    
-    for opIdx = 1:length(operatorNames)
-        operatorName = operatorNames{opIdx};
-        
-        % Clean operator name for field name
-        fieldName = matlab.lang.makeValidName(operatorName);
-        
-        % Get daily data for this operator
-        operatorMap = operatorDailyData(operatorName);
-        dailyDates = keys(operatorMap);
-        
-        % Extract daily statistics
-        dailyCases = [];
-        dailyWorkTimes = [];
-        dailyIdleTimes = [];
-        dailyOvertimes = [];
-        
-        for dayIdx = 1:length(dailyDates)
-            dayData = operatorMap(dailyDates{dayIdx});
-            dailyCases(end+1) = dayData.cases;
-            dailyWorkTimes(end+1) = dayData.workTime;
-            dailyIdleTimes(end+1) = dayData.idleTime;
-            dailyOvertimes(end+1) = dayData.overtime;
-        end
-        
-        % Basic statistics
-        operatorStats.(fieldName).name = operatorName;
-        operatorStats.(fieldName).totalCases = sum(dailyCases);
-        operatorStats.(fieldName).workingDays = length(dailyDates);
-        
-        if ~isempty(dailyCases)
-            operatorStats.(fieldName).avgCasesPerDay = mean(dailyCases);
-            operatorStats.(fieldName).maxCasesPerDay = max(dailyCases);
-            operatorStats.(fieldName).minCasesPerDay = min(dailyCases);
-        else
-            operatorStats.(fieldName).avgCasesPerDay = 0;
-            operatorStats.(fieldName).maxCasesPerDay = 0;
-            operatorStats.(fieldName).minCasesPerDay = 0;
-        end
-        
-        % Work time statistics
-        if ~isempty(dailyWorkTimes)
-            operatorStats.(fieldName).totalWorkTime = sum(dailyWorkTimes);
-            operatorStats.(fieldName).avgWorkTimePerDay = mean(dailyWorkTimes);
-            operatorStats.(fieldName).maxWorkTimePerDay = max(dailyWorkTimes);
-            operatorStats.(fieldName).minWorkTimePerDay = min(dailyWorkTimes);
-        else
-            operatorStats.(fieldName).totalWorkTime = 0;
-            operatorStats.(fieldName).avgWorkTimePerDay = 0;
-            operatorStats.(fieldName).maxWorkTimePerDay = 0;
-            operatorStats.(fieldName).minWorkTimePerDay = 0;
-        end
-        
-        % Idle time statistics
-        if ~isempty(dailyIdleTimes)
-            operatorStats.(fieldName).totalIdleTime = sum(dailyIdleTimes);
-            operatorStats.(fieldName).avgIdleTimePerDay = mean(dailyIdleTimes);
-            operatorStats.(fieldName).maxIdleTimePerDay = max(dailyIdleTimes);
-            operatorStats.(fieldName).minIdleTimePerDay = min(dailyIdleTimes);
-        else
-            operatorStats.(fieldName).totalIdleTime = 0;
-            operatorStats.(fieldName).avgIdleTimePerDay = 0;
-            operatorStats.(fieldName).maxIdleTimePerDay = 0;
-            operatorStats.(fieldName).minIdleTimePerDay = 0;
-        end
-        
-        % Overtime statistics
-        if ~isempty(dailyOvertimes)
-            operatorStats.(fieldName).totalOvertime = sum(dailyOvertimes);
-            operatorStats.(fieldName).avgOvertimePerDay = mean(dailyOvertimes);
-            operatorStats.(fieldName).daysWithOvertime = sum(dailyOvertimes > 0);
-        else
-            operatorStats.(fieldName).totalOvertime = 0;
-            operatorStats.(fieldName).avgOvertimePerDay = 0;
-            operatorStats.(fieldName).daysWithOvertime = 0;
-        end
-        
-        % Efficiency metrics (basic version)
-        if operatorStats.(fieldName).avgWorkTimePerDay > 0
-            operatorStats.(fieldName).avgCasesPerHour = operatorStats.(fieldName).avgCasesPerDay / operatorStats.(fieldName).avgWorkTimePerDay;
-        else
-            operatorStats.(fieldName).avgCasesPerHour = 0;
-        end
-        
-        % Utilization rate (assuming 8-hour workday)
-        standardWorkDay = 8; % hours
-        if operatorStats.(fieldName).avgWorkTimePerDay > 0
-            operatorStats.(fieldName).utilizationRate = min(1.0, operatorStats.(fieldName).avgWorkTimePerDay / standardWorkDay);
-        else
-            operatorStats.(fieldName).utilizationRate = 0;
-        end
-    end
-end
-
-%% Helper function to calculate daily metrics for an operator
-function dailyMetrics = calculateOperatorDailyMetrics(operatorCases)
-    % Calculate detailed daily metrics for a single operator
-    
-    if isempty(operatorCases)
-        dailyMetrics = struct('cases', 0, 'workTime', 0, 'idleTime', 0, 'overtime', 0);
-        return;
-    end
-    
-    % Sort cases by procedure start time
-    startTimes = [operatorCases.procStartTime];
-    [~, sortIdx] = sort(startTimes);
-    sortedCases = operatorCases(sortIdx);
-    
-    % Basic metrics
-    numCases = length(sortedCases);
-    totalProcTime = sum([sortedCases.procTime]); % in minutes
-    
-    % Calculate idle time between consecutive cases
-    totalIdleTime = 0; % in minutes
-    
-    if numCases > 1
-        for i = 2:numCases
-            prevEndTime = sortedCases(i-1).procEndTime;
-            currentStartTime = sortedCases(i).procStartTime;
-            
-            % Only count as idle time if it's the same operator and gap > 5 minutes
-            if currentStartTime > prevEndTime
-                gapTime = currentStartTime - prevEndTime;
-                if gapTime > 5 % Only count gaps > 5 minutes as idle time
-                    totalIdleTime = totalIdleTime + gapTime;
-                end
-            end
-        end
-    end
-    
-    % Calculate overtime (time after 6 PM = 18*60 = 1080 minutes since midnight)
-    overtimeCutoff = 18 * 60; % 6 PM in minutes since midnight
-    totalOvertime = 0; % in minutes
-    
-    for i = 1:numCases
-        caseEndTime = sortedCases(i).procEndTime;
-        if caseEndTime > overtimeCutoff
-            % Case extends past 6 PM
-            caseStartTime = sortedCases(i).procStartTime;
-            if caseStartTime >= overtimeCutoff
-                % Entire case is overtime
-                totalOvertime = totalOvertime + sortedCases(i).procTime;
-            else
-                % Part of case is overtime
-                overtimePortion = caseEndTime - overtimeCutoff;
-                totalOvertime = totalOvertime + overtimePortion;
-            end
-        end
-    end
-    
-    % Create daily metrics structure
-    dailyMetrics = struct();
-    dailyMetrics.cases = numCases;
-    dailyMetrics.workTime = totalProcTime / 60; % Convert to hours
-    dailyMetrics.idleTime = totalIdleTime / 60; % Convert to hours  
-    dailyMetrics.overtime = totalOvertime / 60; % Convert to hours
-    
-    % Additional timing info
-    dailyMetrics.firstCaseStart = sortedCases(1).procStartTime;
-    dailyMetrics.lastCaseEnd = sortedCases(end).procEndTime;
-    dailyMetrics.spanTime = (dailyMetrics.lastCaseEnd - dailyMetrics.firstCaseStart) / 60; % Total span in hours
 end
 
 %% Helper function to convert cases to scheduler format

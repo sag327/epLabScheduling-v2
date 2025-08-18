@@ -127,6 +127,7 @@ historicalData.surgeon = rawData.(findColumn({'Primary_Surgeon', 'PrimarySurgeon
 historicalData.procedure = rawData.(findColumn({'Procedure_Primary', 'Procedure_Primary_', 'Procedure (Primary)'}));
 historicalData.service = rawData.Service;
 historicalData.location = rawData.(findColumn({'Case_Location', 'CaseLocation', 'Case Location'}));
+historicalData.room = rawData.(findColumn({'Room'}));
 
 % Admission status (inpatient/outpatient)
 % Try multiple possible column names for admission status
@@ -156,7 +157,6 @@ historicalData.procedureTime = rawData.(findColumn({'Procedure_Start_to_Procedur
 historicalData.postTime = rawData.(findColumn({'Procedure_Complete_to_Out_of_Room_Minutes', 'ProcedureCompleteToOutOfRoom_Minutes_', 'Procedure Complete to Out of Room (Minutes)'}));
 historicalData.totalRoomTime = rawData.(findColumn({'In_Room_to_Out_of_Room_Minutes', 'InRoomToOutOfRoom_Minutes_', 'In Room to Out of Room (Minutes)'}));
 historicalData.anesthesiaTime = rawData.(findColumn({'In_Room_to_Anesthesia_Induction_Minutes', 'InRoomToAnesthesiaInduction_Minutes_', 'In Room to Anesthesia Induction (Minutes)'})); % Best available match
-historicalData.preprocTime = []; % Not available in new format
 
 % Extract procedure start and end times (time of day only)
 procedureStartTimestamps = rawData.(findColumn({'Procedure_Start_Date_and_Time', 'ProcedureStartDateAndTime', 'Procedure Start Date and Time'}));
@@ -255,7 +255,6 @@ fieldDescriptions.procedureTime = 'Actual procedure duration (minutes)';
 fieldDescriptions.postTime = 'Time from procedure end to room exit (minutes)';
 fieldDescriptions.totalRoomTime = 'Total time in room (minutes)';
 fieldDescriptions.anesthesiaTime = 'Time from room entry to anesthesia induction (minutes)';
-fieldDescriptions.preprocTime = 'Pre-procedure preparation time (not available in new format)';
 fieldDescriptions.procedureStartTimeOfDay = 'Time of day when procedure started (duration from midnight)';
 fieldDescriptions.procedureCompleteTimeOfDay = 'Time of day when procedure completed (duration from midnight)';
 fieldDescriptions.procedureStartTimestamp = 'Full timestamp when procedure started';

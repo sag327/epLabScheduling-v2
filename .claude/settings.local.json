@@ -9,7 +9,9 @@
       "Bash(ls:*)",
       "Bash(export:*)",
       "Bash(chmod:*)",
-      "Bash(git restore:*)"
+      "Bash(git restore:*)",
+      "Bash(git push:*)",
+      "Bash(git remote add:*)"
     ],
     "deny": []
   }
