@@ -177,15 +177,32 @@ for i = 1:length(allCases)
         labelY = procStart_hour + procDuration/2;
         labelX = xPos;
         
-        % Extract last name from operator
-        operatorParts = strsplit(caseItem.operator, ' ');
-        if length(operatorParts) > 1
-            lastName = operatorParts{end};
+        % Extract last name from operator (handle various name formats)
+        operatorName = caseItem.operator;
+        
+        % Handle formats like "LAST, FIRST" or "FIRST LAST" or "FIRST MIDDLE LAST"
+        if contains(operatorName, ',')
+            % Format: "LAST, FIRST" - take everything before comma
+            nameParts = strsplit(operatorName, ',');
+            lastNamePart = strtrim(nameParts{1});
+            % Handle multiple last names like "SMITH JONES"
+            lastNameWords = strsplit(lastNamePart, ' ');
+            if length(lastNameWords) > 1
+                lastName = lastNameWords{end}; % Take the last word
+            else
+                lastName = lastNamePart;
+            end
         else
-            lastName = operatorParts{1};
+            % Format: "FIRST LAST" or "FIRST MIDDLE LAST"
+            nameParts = strsplit(operatorName, ' ');
+            if length(nameParts) > 1
+                lastName = nameParts{end}; % Take the last word
+            else
+                lastName = operatorName; % Single name
+            end
         end
         
-        % Create label text
+        % Create label text with case ID and last name
         labelText = sprintf('%s\n%s', caseItem.caseID, lastName);
         
         text(ax1, labelX, labelY, labelText, ...

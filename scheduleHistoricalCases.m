@@ -18,6 +18,7 @@ function [schedule, results] = scheduleHistoricalCases(cases, varargin)
 %       'inpatient' - Only schedule inpatient cases
 %   'maxOperatorTime' - Maximum time per operator in minutes (default: 480, 8 hours)
 %   'turnoverTime' - Room turnover time between cases in minutes (default: 15)
+%   'enforceMiddnight' - Ensure all cases complete before midnight (default: true)
 %   'verbose' - Display detailed output (default: true)
 %
 % Outputs:
@@ -33,6 +34,7 @@ addParameter(p, 'optimizationMetric', 'operatorIdle', @(x) ismember(x, {'operato
 addParameter(p, 'caseFilter', 'all', @(x) ismember(x, {'all', 'outpatient', 'inpatient'}));
 addParameter(p, 'maxOperatorTime', 480, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'turnoverTime', 15, @(x) isnumeric(x) && x >= 0);
+addParameter(p, 'enforceMiddnight', true, @islogical);
 addParameter(p, 'verbose', true, @islogical);
 
 parse(p, cases, varargin{:});
@@ -43,6 +45,7 @@ optimizationMetric = p.Results.optimizationMetric;
 caseFilter = p.Results.caseFilter;
 maxOperatorTime = p.Results.maxOperatorTime;
 turnoverTime = p.Results.turnoverTime;
+enforceMiddnight = p.Results.enforceMiddnight;
 verbose = p.Results.verbose;
 
 if verbose
@@ -155,7 +158,12 @@ end
 
 % Estimate schedule horizon (all cases in sequence + buffer)
 totalProcTime = sum(caseProcTimes);
-maxHorizon = max(labStartMinutes) + totalProcTime + 120;
+if enforceMiddnight
+    % Constrain to midnight (1440 minutes = 24 hours)
+    maxHorizon = 1440;  % 24:00 (midnight)
+else
+    maxHorizon = max(labStartMinutes) + totalProcTime + 120;
+end
 
 % Create time grid (10-minute intervals)
 timeStep = 10;
@@ -617,6 +625,47 @@ if verbose
     fprintf(' Complete\n');
 end
 
+% Constraint 7: Midnight completion constraint (all cases must finish before 24:00)
+if enforceMiddnight
+    if verbose
+        fprintf('Building constraint 7 (midnight completion)...');
+    end
+    
+    midnightMinutes = 1440;  % 24:00 = 1440 minutes
+    constraint7Rows = [];
+    constraint7Cols = [];
+    
+    for i = 1:numCases
+        for j = 1:numLabs
+            if labPreferences(i, j) == 1
+                for t = validTimeSlots{j}
+                    startTime = timeSlots(t);
+                    caseEndTime = startTime + caseSetupTimes(i) + caseProcTimes(i) + casePostTimes(i) + turnoverTime;
+                    
+                    % If this assignment would cause the case to end after midnight, add constraint to prevent it
+                    if caseEndTime > midnightMinutes
+                        constraint7Rows = [constraint7Rows; length(constraint7Rows) + 1];
+                        constraint7Cols = [constraint7Cols; getVarIndex(i, j, t)];
+                    end
+                end
+            end
+        end
+    end
+    
+    if ~isempty(constraint7Rows)
+        constraint7Values = ones(length(constraint7Rows), 1);
+        numConstraint7 = max(constraint7Rows);
+        constraint7Matrix = sparse(constraint7Rows, constraint7Cols, constraint7Values, numConstraint7, numVars);
+        A(ineqRowIdx + (1:numConstraint7), :) = constraint7Matrix;
+        b(ineqRowIdx + (1:numConstraint7)) = 0;  % These assignments are forbidden (≤ 0)
+        ineqRowIdx = ineqRowIdx + numConstraint7;
+    end
+    
+    if verbose
+        fprintf(' Complete\n');
+    end
+end
+
 % Objective function
 if verbose
     fprintf('Building objective function (%s)...', optimizationMetric);
@@ -625,28 +674,16 @@ f = zeros(numVars, 1);
 
 switch optimizationMetric
     case 'operatorIdle'
-        % Minimize total operator idle time
-        for op = 1:numOperators
-            opCases = find(caseOperators == op);
-            
-            % Add penalty for gaps between cases
-            for i = 1:length(opCases)-1
-                for j = 1:length(opCases)-i
-                    case1 = opCases(i);
-                    case2 = opCases(i+j);
-                    
-                    for lab1 = 1:numLabs
-                        for lab2 = 1:numLabs
-                            for t1 = 1:numTimeSlots
-                                for t2 = t1+1:numTimeSlots
-                                    if labPreferences(case1, lab1) == 1 && labPreferences(case2, lab2) == 1
-                                        gapPenalty = (timeSlots(t2) - timeSlots(t1) - caseProcTimes(case1)) / 1000;
-                                        f(getVarIndex(case1, lab1, t1)) = f(getVarIndex(case1, lab1, t1)) + gapPenalty;
-                                        f(getVarIndex(case2, lab2, t2)) = f(getVarIndex(case2, lab2, t2)) + gapPenalty;
-                                    end
-                                end
-                            end
-                        end
+        % Minimize total operator idle time by preferring earlier start times
+        % This encourages compact scheduling which naturally minimizes gaps
+        for i = 1:numCases
+            for j = 1:numLabs
+                for t = validTimeSlots{j}
+                    if labPreferences(i, j) == 1
+                        % Penalty increases with later start times
+                        % This encourages scheduling cases as early as possible
+                        timePenalty = timeSlots(t) / 1000;
+                        f(getVarIndex(i, j, t)) = f(getVarIndex(i, j, t)) + timePenalty;
                     end
                 end
             end
@@ -719,7 +756,7 @@ try
 catch ME
     fprintf('Optimization failed: %s\n', ME.message);
     fprintf('Falling back to greedy heuristic...\n');
-    [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose, turnoverTime);
+    [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose, turnoverTime, enforceMiddnight);
     return;
 end
 
@@ -798,7 +835,7 @@ end
 
 end
 
-function [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose, turnoverTime)
+function [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose, turnoverTime, enforceMiddnight)
 % Fallback greedy scheduling algorithm
 
 if verbose
@@ -827,7 +864,7 @@ labEndTimes = labStartMinutes;
 for i = 1:length(sortedCases)
     case_i = sortedCases(i);
     
-    % Find best lab (earliest available)
+    % Find best lab (earliest available) that respects midnight constraint
     bestLab = 1;
     bestStartTime = labEndTimes(1);
     
@@ -840,6 +877,15 @@ for i = 1:length(sortedCases)
                 bestLab = j;
                 bestStartTime = labEndTimes(j);
             end
+        end
+    end
+    
+    % Check midnight constraint if enforced
+    if enforceMiddnight
+        caseEndTime = bestStartTime + case_i.setupTime + case_i.procTime + case_i.postTime + turnoverTime;
+        if caseEndTime > 1440  % After midnight
+            fprintf('Warning: Case %s cannot be scheduled before midnight - skipping\n', case_i.caseID);
+            continue;  % Skip this case
         end
     end
     
