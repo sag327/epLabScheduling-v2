@@ -152,27 +152,58 @@ getVarIndex = @(case_idx, lab_idx, time_idx) ...
     (case_idx - 1) * numLabs * numTimeSlots + ...
     (lab_idx - 1) * numTimeSlots + time_idx;
 
-% Constraint matrices
-Aeq = [];
-beq = [];
-A = [];
-b = [];
+% Pre-filter valid time slots for each lab to reduce computation
+validTimeSlots = cell(numLabs, 1);
+for j = 1:numLabs
+    labStart = labStartMinutes(j);
+    validTimeSlots{j} = find(timeSlots >= labStart);
+end
+
+% Estimate constraint counts for sparse matrix pre-allocation
+numConstraint1 = numCases;  % Each case scheduled once
+numConstraint2 = numLabs * numTimeSlots;  % Lab capacity
+numConstraint3 = numOperators * numTimeSlots;  % Operator availability
+numConstraint4 = sum(cellfun(@(x) numCases * (numTimeSlots - length(x)), validTimeSlots));  % Lab start times
+numConstraint5 = numLabs - 1;  % Symmetry breaking
+% Constraint 6 (priority) - estimate based on priority cases
+priorityCaseCount = sum(casePriorities == 1);
+numConstraint6 = priorityCaseCount * (numCases - priorityCaseCount) * numLabs * numTimeSlots^2 / 10;  % Conservative estimate
+
+totalConstraints = numConstraint1 + numConstraint2 + numConstraint3 + numConstraint4 + numConstraint5 + numConstraint6;
+totalEqConstraints = numConstraint1;
+
+if verbose
+    fprintf('Estimated constraints: %d equality, %d inequality\n', totalEqConstraints, totalConstraints - totalEqConstraints);
+    fprintf('Pre-allocating sparse matrices...\n');
+end
+
+% Pre-allocate sparse constraint matrices
+% Estimate 5-10 non-zeros per constraint row on average
+avgNonZerosPerRow = min(10, numVars/10);
+Aeq = spalloc(totalEqConstraints, numVars, totalEqConstraints * avgNonZerosPerRow);
+beq = zeros(totalEqConstraints, 1);
+A = spalloc(totalConstraints - totalEqConstraints, numVars, (totalConstraints - totalEqConstraints) * avgNonZerosPerRow);
+b = zeros(totalConstraints - totalEqConstraints, 1);
+
+% Track current row indices
+eqRowIdx = 0;
+ineqRowIdx = 0;
 
 % Constraint 1: Each case must be scheduled exactly once
 if verbose
     fprintf('Building constraint 1 (case assignment)...');
 end
 for i = 1:numCases
-    row = zeros(1, numVars);
+    eqRowIdx = eqRowIdx + 1;
     for j = 1:numLabs
-        for t = 1:numTimeSlots
-            if labPreferences(i, j) == 1
-                row(getVarIndex(i, j, t)) = 1;
+        if labPreferences(i, j) == 1
+            % Only consider valid time slots for this lab
+            for t = validTimeSlots{j}
+                Aeq(eqRowIdx, getVarIndex(i, j, t)) = 1;
             end
         end
     end
-    Aeq = [Aeq; row];
-    beq = [beq; 1];
+    beq(eqRowIdx) = 1;
     if verbose && mod(i, ceil(numCases/10)) == 0
         fprintf(' %.0f%%', 100*i/numCases);
     end
@@ -185,34 +216,76 @@ end
 if verbose
     fprintf('Building constraint 2 (lab capacity)...');
 end
-totalConstraint2Steps = numLabs * numTimeSlots;
-currentStep = 0;
-for j = 1:numLabs
-    for t = 1:numTimeSlots
+
+% Build constraints in parallel for each lab
+labConstraints = cell(numLabs, 1);
+labConstraintCounts = zeros(numLabs, 1);
+
+parfor j = 1:numLabs
+    labRows = [];
+    labValues = [];
+    labCols = [];
+    constraintCount = 0;
+    
+    validTimes = validTimeSlots{j};
+    for t_idx = 1:length(validTimes)
+        t = validTimes(t_idx);
         currentTime = timeSlots(t);
-        row = zeros(1, numVars);
+        constraintCount = constraintCount + 1;
         
         for i = 1:numCases
-            caseEndTime = currentTime + caseSetupTimes(i) + caseProcTimes(i) + casePostTimes(i);
-            
-            for t_start = 1:numTimeSlots
-                startTime = timeSlots(t_start);
-                if startTime <= currentTime && ...
-                   startTime + caseSetupTimes(i) + caseProcTimes(i) + casePostTimes(i) > currentTime && ...
-                   labPreferences(i, j) == 1
-                    row(getVarIndex(i, j, t_start)) = 1;
+            if labPreferences(i, j) == 1
+                for t_start = validTimes
+                    startTime = timeSlots(t_start);
+                    caseEndTime = startTime + caseSetupTimes(i) + caseProcTimes(i) + casePostTimes(i);
+                    
+                    if startTime <= currentTime && caseEndTime > currentTime
+                        varIdx = getVarIndex(i, j, t_start);
+                        labRows = [labRows; constraintCount];
+                        labCols = [labCols; varIdx];
+                        labValues = [labValues; 1];
+                    end
                 end
             end
         end
-        
-        A = [A; row];
-        b = [b; 1];
-        currentStep = currentStep + 1;
-        if verbose && mod(currentStep, ceil(totalConstraint2Steps/20)) == 0
-            fprintf(' %.0f%%', 100*currentStep/totalConstraint2Steps);
+    end
+    
+    if isempty(labRows)
+        % Create empty sparse matrix with correct dimensions
+        labConstraints{j} = sparse(constraintCount, numVars);
+    else
+        labConstraints{j} = sparse(labRows, labCols, labValues, constraintCount, numVars);
+    end
+    labConstraintCounts(j) = constraintCount;
+end
+
+% Combine lab constraints
+totalLabConstraints = sum(labConstraintCounts);
+if totalLabConstraints > 0
+    % Calculate total non-zeros
+    totalNonZeros = 0;
+    for j = 1:numLabs
+        if ~isempty(labConstraints{j})
+            totalNonZeros = totalNonZeros + nnz(labConstraints{j});
         end
     end
+    
+    labConstraintMatrix = spalloc(totalLabConstraints, numVars, totalNonZeros);
+    currentRow = 0;
+    for j = 1:numLabs
+        if labConstraintCounts(j) > 0
+            rows = currentRow + (1:labConstraintCounts(j));
+            labConstraintMatrix(rows, :) = labConstraints{j};
+            currentRow = currentRow + labConstraintCounts(j);
+        end
+    end
+    
+    % Add to main constraint matrix
+    A(ineqRowIdx + (1:totalLabConstraints), :) = labConstraintMatrix;
+    b(ineqRowIdx + (1:totalLabConstraints)) = 1;
+    ineqRowIdx = ineqRowIdx + totalLabConstraints;
 end
+
 if verbose
     fprintf(' Complete\n');
 end
@@ -221,38 +294,85 @@ end
 if verbose
     fprintf('Building constraint 3 (operator availability)...');
 end
-totalConstraint3Steps = numOperators * numTimeSlots;
-currentStep = 0;
-for op = 1:numOperators
+
+% Build constraints in parallel for each operator
+operatorConstraints = cell(numOperators, 1);
+operatorConstraintCounts = zeros(numOperators, 1);
+
+parfor op = 1:numOperators
     opCases = find(caseOperators == op);
+    if isempty(opCases)
+        operatorConstraints{op} = sparse(0, numVars);
+        operatorConstraintCounts(op) = 0;
+        continue;
+    end
+    
+    opRows = [];
+    opValues = [];
+    opCols = [];
+    constraintCount = 0;
     
     for t = 1:numTimeSlots
         currentTime = timeSlots(t);
-        row = zeros(1, numVars);
+        constraintCount = constraintCount + 1;
         
         for case_idx = opCases
             for j = 1:numLabs
-                for t_start = 1:numTimeSlots
-                    startTime = timeSlots(t_start);
-                    procStartTime = startTime + caseSetupTimes(case_idx);
-                    procEndTime = procStartTime + caseProcTimes(case_idx);
-                    
-                    if procStartTime <= currentTime && procEndTime > currentTime && ...
-                       labPreferences(case_idx, j) == 1
-                        row(getVarIndex(case_idx, j, t_start)) = 1;
+                if labPreferences(case_idx, j) == 1
+                    validTimes = validTimeSlots{j};
+                    for t_start = validTimes
+                        startTime = timeSlots(t_start);
+                        procStartTime = startTime + caseSetupTimes(case_idx);
+                        procEndTime = procStartTime + caseProcTimes(case_idx);
+                        
+                        if procStartTime <= currentTime && procEndTime > currentTime
+                            varIdx = getVarIndex(case_idx, j, t_start);
+                            opRows = [opRows; constraintCount];
+                            opCols = [opCols; varIdx];
+                            opValues = [opValues; 1];
+                        end
                     end
                 end
             end
         end
-        
-        A = [A; row];
-        b = [b; 1];
-        currentStep = currentStep + 1;
-        if verbose && mod(currentStep, ceil(totalConstraint3Steps/10)) == 0
-            fprintf(' %.0f%%', 100*currentStep/totalConstraint3Steps);
+    end
+    
+    if isempty(opRows)
+        % Create empty sparse matrix with correct dimensions
+        operatorConstraints{op} = sparse(constraintCount, numVars);
+    else
+        operatorConstraints{op} = sparse(opRows, opCols, opValues, constraintCount, numVars);
+    end
+    operatorConstraintCounts(op) = constraintCount;
+end
+
+% Combine operator constraints
+totalOpConstraints = sum(operatorConstraintCounts);
+if totalOpConstraints > 0
+    % Calculate total non-zeros safely
+    totalNonZeros = 0;
+    for op = 1:numOperators
+        if ~isempty(operatorConstraints{op})
+            totalNonZeros = totalNonZeros + nnz(operatorConstraints{op});
         end
     end
+    
+    opConstraintMatrix = spalloc(totalOpConstraints, numVars, totalNonZeros);
+    currentRow = 0;
+    for op = 1:numOperators
+        if operatorConstraintCounts(op) > 0
+            rows = currentRow + (1:operatorConstraintCounts(op));
+            opConstraintMatrix(rows, :) = operatorConstraints{op};
+            currentRow = currentRow + operatorConstraintCounts(op);
+        end
+    end
+    
+    % Add to main constraint matrix
+    A(ineqRowIdx + (1:totalOpConstraints), :) = opConstraintMatrix;
+    b(ineqRowIdx + (1:totalOpConstraints)) = 1;
+    ineqRowIdx = ineqRowIdx + totalOpConstraints;
 end
+
 if verbose
     fprintf(' Complete\n');
 end
@@ -261,19 +381,35 @@ end
 if verbose
     fprintf('Building constraint 4 (lab start times)...');
 end
+
+% Build constraint 4 with dynamic allocation to avoid counting errors
+constraint4Rows = [];
+constraint4Cols = [];
+constraintIdx = 0;
+
 for j = 1:numLabs
     labStart = labStartMinutes(j);
+    invalidTimeSlots = find(timeSlots < labStart);
+    
     for i = 1:numCases
-        for t = 1:numTimeSlots
-            if timeSlots(t) < labStart && labPreferences(i, j) == 1
-                row = zeros(1, numVars);
-                row(getVarIndex(i, j, t)) = 1;
-                A = [A; row];
-                b = [b; 0];
+        if labPreferences(i, j) == 1
+            for t = invalidTimeSlots'
+                constraintIdx = constraintIdx + 1;
+                constraint4Rows = [constraint4Rows; constraintIdx];
+                constraint4Cols = [constraint4Cols; getVarIndex(i, j, t)];
             end
         end
     end
 end
+
+if constraintIdx > 0
+    constraint4Values = ones(length(constraint4Rows), 1);
+    constraint4Matrix = sparse(constraint4Rows, constraint4Cols, constraint4Values, constraintIdx, numVars);
+    A(ineqRowIdx + (1:constraintIdx), :) = constraint4Matrix;
+    b(ineqRowIdx + (1:constraintIdx)) = 0;
+    ineqRowIdx = ineqRowIdx + constraintIdx;
+end
+
 if verbose
     fprintf(' Complete\n');
 end
@@ -283,21 +419,59 @@ end
 if verbose
     fprintf('Building constraint 5 (symmetry breaking)...');
 end
-for j = 1:numLabs-1
-    row = zeros(1, numVars);
-    for i = 1:numCases
-        for t = 1:numTimeSlots
+
+constraint5Count = numLabs - 1;
+if constraint5Count > 0
+    % Estimate number of non-zeros for pre-allocation
+    totalEntries = 0;
+    for j = 1:numLabs-1
+        for i = 1:numCases
             if labPreferences(i, j) == 1
-                row(getVarIndex(i, j, t)) = row(getVarIndex(i, j, t)) + 1;
+                totalEntries = totalEntries + length(validTimeSlots{j});
             end
             if labPreferences(i, j+1) == 1
-                row(getVarIndex(i, j+1, t)) = row(getVarIndex(i, j+1, t)) - 1;
+                totalEntries = totalEntries + length(validTimeSlots{j+1});
             end
         end
     end
-    A = [A; -row];  % -row because we want lab j >= lab j+1, so lab j+1 - lab j <= 0
-    b = [b; 0];
+    
+    rows = zeros(totalEntries, 1);
+    cols = zeros(totalEntries, 1);
+    values = zeros(totalEntries, 1);
+    entryIdx = 0;
+    
+    for j = 1:numLabs-1
+        for i = 1:numCases
+            for t = validTimeSlots{j}
+                if labPreferences(i, j) == 1
+                    entryIdx = entryIdx + 1;
+                    rows(entryIdx) = j;
+                    cols(entryIdx) = getVarIndex(i, j, t);
+                    values(entryIdx) = -1;  % Negative because we want lab j+1 - lab j <= 0
+                end
+            end
+            for t = validTimeSlots{j+1}
+                if labPreferences(i, j+1) == 1
+                    entryIdx = entryIdx + 1;
+                    rows(entryIdx) = j;
+                    cols(entryIdx) = getVarIndex(i, j+1, t);
+                    values(entryIdx) = 1;
+                end
+            end
+        end
+    end
+    
+    % Trim to actual size
+    rows = rows(1:entryIdx);
+    cols = cols(1:entryIdx);
+    values = values(1:entryIdx);
+    
+    constraint5Matrix = sparse(rows, cols, values, constraint5Count, numVars);
+    A(ineqRowIdx + (1:constraint5Count), :) = constraint5Matrix;
+    b(ineqRowIdx + (1:constraint5Count)) = 0;
+    ineqRowIdx = ineqRowIdx + constraint5Count;
 end
+
 if verbose
     fprintf(' Complete\n');
 end
@@ -306,6 +480,12 @@ end
 if verbose
     fprintf('Building constraint 6 (priority constraints)...');
 end
+
+% Count priority constraints and pre-allocate
+constraint6Count = 0;
+totalEntries = 0;
+
+% First pass: count constraints and entries
 for op = 1:numOperators
     opCases = find(caseOperators == op);
     priorityCases = opCases(casePriorities(opCases) == 1);
@@ -314,14 +494,54 @@ for op = 1:numOperators
         for normalCase = opCases
             if normalCase ~= priorityCase && casePriorities(normalCase) ~= 1
                 for j = 1:numLabs
-                    for t_priority = 1:numTimeSlots
-                        for t_normal = 1:t_priority
-                            if labPreferences(priorityCase, j) == 1 && labPreferences(normalCase, j) == 1
-                                row = zeros(1, numVars);
-                                row(getVarIndex(priorityCase, j, t_priority)) = 1;
-                                row(getVarIndex(normalCase, j, t_normal)) = 1;
-                                A = [A; row];
-                                b = [b; 1];
+                    if labPreferences(priorityCase, j) == 1 && labPreferences(normalCase, j) == 1
+                        validTimesJ = validTimeSlots{j};
+                        numValidTimes = length(validTimesJ);
+                        numConstraintsForThisPair = sum(1:numValidTimes);  % triangular number
+                        constraint6Count = constraint6Count + numConstraintsForThisPair;
+                        totalEntries = totalEntries + 2 * numConstraintsForThisPair;  % 2 variables per constraint
+                    end
+                end
+            end
+        end
+    end
+end
+
+if constraint6Count > 0
+    rows = zeros(totalEntries, 1);
+    cols = zeros(totalEntries, 1);
+    values = ones(totalEntries, 1);
+    constraintIdx = 0;
+    entryIdx = 0;
+    
+    % Second pass: build constraints
+    for op = 1:numOperators
+        opCases = find(caseOperators == op);
+        priorityCases = opCases(casePriorities(opCases) == 1);
+        
+        for priorityCase = priorityCases
+            for normalCase = opCases
+                if normalCase ~= priorityCase && casePriorities(normalCase) ~= 1
+                    for j = 1:numLabs
+                        if labPreferences(priorityCase, j) == 1 && labPreferences(normalCase, j) == 1
+                            validTimesJ = validTimeSlots{j};
+                            for t_priority_idx = 1:length(validTimesJ)
+                                t_priority = validTimesJ(t_priority_idx);
+                                for t_normal_idx = 1:t_priority_idx
+                                    t_normal = validTimesJ(t_normal_idx);
+                                    
+                                    constraintIdx = constraintIdx + 1;
+                                    
+                                    % Priority case variable
+                                    entryIdx = entryIdx + 1;
+                                    rows(entryIdx) = constraintIdx;
+                                    cols(entryIdx) = getVarIndex(priorityCase, j, t_priority);
+                                    
+                                    % Normal case variable
+                                    entryIdx = entryIdx + 1;
+                                    rows(entryIdx) = constraintIdx;
+                                    cols(entryIdx) = getVarIndex(normalCase, j, t_normal);
+                                end
                             end
                         end
                     end
@@ -329,7 +549,18 @@ for op = 1:numOperators
             end
         end
     end
+    
+    % Trim to actual size
+    rows = rows(1:entryIdx);
+    cols = cols(1:entryIdx);
+    values = values(1:entryIdx);
+    
+    constraint6Matrix = sparse(rows, cols, values, constraintIdx, numVars);
+    A(ineqRowIdx + (1:constraintIdx), :) = constraint6Matrix;
+    b(ineqRowIdx + (1:constraintIdx)) = 1;
+    ineqRowIdx = ineqRowIdx + constraintIdx;
 end
+
 if verbose
     fprintf(' Complete\n');
 end
@@ -418,10 +649,7 @@ if verbose
     fprintf(' Complete\n');
 end
 
-if verbose
-    fprintf('Optimization problem size: %d variables, %d constraints\n', numVars, size(A,1) + size(Aeq,1));
-    fprintf('Solving integer linear program...\n');
-end
+% Trim constraint matrices to actual size\nAeq = Aeq(1:eqRowIdx, :);\nbeq = beq(1:eqRowIdx);\nA = A(1:ineqRowIdx, :);\nb = b(1:ineqRowIdx);\n\nif verbose\n    fprintf('Final problem size: %d variables, %d constraints (%d equality, %d inequality)\\n', ...\n        numVars, eqRowIdx + ineqRowIdx, eqRowIdx, ineqRowIdx);\n    fprintf('Constraint matrix sparsity: %.2f%% (A), %.2f%% (Aeq)\\n', ...\n        100*(1-nnz(A)/numel(A)), 100*(1-nnz(Aeq)/numel(Aeq)));\n    fprintf('Solving integer linear program...\\n');\nend
 
 % Solve optimization problem
 if verbose
