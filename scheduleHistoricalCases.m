@@ -17,6 +17,7 @@ function [schedule, results] = scheduleHistoricalCases(cases, varargin)
 %       'outpatient' - Only schedule outpatient cases
 %       'inpatient' - Only schedule inpatient cases
 %   'maxOperatorTime' - Maximum time per operator in minutes (default: 480, 8 hours)
+%   'turnoverTime' - Room turnover time between cases in minutes (default: 15)
 %   'verbose' - Display detailed output (default: true)
 %
 % Outputs:
@@ -31,6 +32,7 @@ addParameter(p, 'labStartTimes', {'8:00', '8:00', '8:00','8:00','8:00'}, @iscell
 addParameter(p, 'optimizationMetric', 'operatorIdle', @(x) ismember(x, {'operatorIdle', 'labIdle', 'makespan', 'operatorOvertime'}));
 addParameter(p, 'caseFilter', 'all', @(x) ismember(x, {'all', 'outpatient', 'inpatient'}));
 addParameter(p, 'maxOperatorTime', 480, @(x) isnumeric(x) && x > 0);
+addParameter(p, 'turnoverTime', 15, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'verbose', true, @islogical);
 
 parse(p, cases, varargin{:});
@@ -40,6 +42,7 @@ labStartTimes = p.Results.labStartTimes;
 optimizationMetric = p.Results.optimizationMetric;
 caseFilter = p.Results.caseFilter;
 maxOperatorTime = p.Results.maxOperatorTime;
+turnoverTime = p.Results.turnoverTime;
 verbose = p.Results.verbose;
 
 if verbose
@@ -277,7 +280,7 @@ parfor j = 1:numLabs
             if labPreferences(i, j) == 1
                 for t_start = validTimes
                     startTime = timeSlots(t_start);
-                    caseEndTime = startTime + caseSetupTimes(i) + caseProcTimes(i) + casePostTimes(i);
+                    caseEndTime = startTime + caseSetupTimes(i) + caseProcTimes(i) + casePostTimes(i) + turnoverTime;
                     
                     if startTime <= currentTime && caseEndTime > currentTime
                         varIdx = getVarIndex(i, j, t_start);
@@ -716,7 +719,7 @@ try
 catch ME
     fprintf('Optimization failed: %s\n', ME.message);
     fprintf('Falling back to greedy heuristic...\n');
-    [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose);
+    [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose, turnoverTime);
     return;
 end
 
@@ -744,9 +747,10 @@ for i = 1:numCases
                 caseInfo.setupTime = cases(i).setupTime;
                 caseInfo.procTime = cases(i).procTime;
                 caseInfo.postTime = cases(i).postTime;
-                caseInfo.endTime = startTime + caseInfo.setupTime + caseInfo.procTime + caseInfo.postTime;
+                caseInfo.endTime = startTime + caseInfo.setupTime + caseInfo.procTime + caseInfo.postTime + turnoverTime;
                 caseInfo.procStartTime = startTime + caseInfo.setupTime;
                 caseInfo.procEndTime = caseInfo.procStartTime + caseInfo.procTime;
+                caseInfo.turnoverTime = turnoverTime;
                 
                 if isempty(schedule.labs{j})
                     schedule.labs{j} = caseInfo;
@@ -794,7 +798,7 @@ end
 
 end
 
-function [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose)
+function [schedule, results] = greedySchedule(cases, numLabs, labStartMinutes, caseFilter, verbose, turnoverTime)
 % Fallback greedy scheduling algorithm
 
 if verbose
@@ -848,9 +852,10 @@ for i = 1:length(sortedCases)
     caseInfo.setupTime = case_i.setupTime;
     caseInfo.procTime = case_i.procTime;
     caseInfo.postTime = case_i.postTime;
-    caseInfo.endTime = bestStartTime + caseInfo.setupTime + caseInfo.procTime + caseInfo.postTime;
+    caseInfo.endTime = bestStartTime + caseInfo.setupTime + caseInfo.procTime + caseInfo.postTime + turnoverTime;
     caseInfo.procStartTime = bestStartTime + caseInfo.setupTime;
     caseInfo.procEndTime = caseInfo.procStartTime + caseInfo.procTime;
+    caseInfo.turnoverTime = turnoverTime;
     
     if isempty(schedule.labs{bestLab})
         schedule.labs{bestLab} = caseInfo;
