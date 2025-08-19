@@ -1,60 +1,69 @@
 function analyzeHistoricalData(historicalData, varargin)
 % Analyzes historical procedure data and schedule structures
-% Focuses on statistical analysis, schedule performance, and operator insights
-% Does NOT perform any schedule reconstruction or optimization
+% Provides comprehensive statistical analysis, schedule performance metrics, 
+% and operator insights for EP lab operations
 %
-% Usage:
+% Syntax:
 %   analyzeHistoricalData(historicalData)
-%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules)
-%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, 'ShowStats', true)
+%   analyzeHistoricalData(historicalData, Name, Value, ...)
 %
-% Inputs:
+% Required Input:
 %   historicalData - Historical data structure from loadHistoricalDataFromFile
+%                   Must contain fields: caseID, date, surgeon, procedure
 %
-% Parameters:
-%   HistoricalSchedules - Historical schedules structure (optional)
-%   ShowStats - Whether to display detailed statistics (default: true)
-%   SaveReport - Whether to save analysis report to file (default: false)
-%   ReportFile - File name for analysis report (default: 'historical_analysis_report.txt')
+% Name-Value Parameters:
+%   'HistoricalSchedules' - containers.Map with reconstructed schedules (default: [])
+%                          Optional. Enables schedule performance analysis.
+%   'ShowStats'          - logical, display detailed statistics (default: true)
+%   'SaveReport'         - logical, save analysis to text file (default: false)  
+%   'ReportFile'         - char/string, output file name (default: 'historical_analysis_report.txt')
 %
-% Outputs:
-%   None - Function displays analysis and optionally saves report
+% Examples:
+%   % Basic analysis (data only)
+%   [historicalData, ~] = loadHistoricalDataFromFile();
+%   analyzeHistoricalData(historicalData);
+%
+%   % Full analysis with schedules
+%   [historicalData, schedules] = loadHistoricalDataFromFile();
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules);
+%
+%   % Save report without displaying
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, ...
+%                        'ShowStats', false, 'SaveReport', true, ...
+%                        'ReportFile', 'ep_lab_analysis.txt');
+%
+% Output:
+%   Displays comprehensive analysis including:
+%   - Dataset summary statistics
+%   - Procedure type and surgeon analysis  
+%   - Time duration analysis
+%   - Room utilization patterns
+%   - Schedule performance metrics (if schedules provided)
+%   - Operator workload analysis (if schedules provided)
+%   - Procedure duration percentiles by operator (if schedules provided)
+%
+% See also: loadHistoricalDataFromFile, reconstructHistoricalSchedule
 
-% Validate input
-if ~isstruct(historicalData)
-    error('historicalData must be a structure from loadHistoricalDataFromFile');
-end
+% Parse input arguments using inputParser
+p = inputParser;
 
-% Set default parameters
-historicalSchedules = [];
-showStats = true;
-saveReport = false;
-reportFile = 'historical_analysis_report.txt';
+% Required input validation
+addRequired(p, 'historicalData', @(x) isstruct(x) && isfield(x, 'caseID'));
 
-% Parse optional parameters
-i = 1;
-while i <= length(varargin)
-    if ischar(varargin{i}) || isstring(varargin{i})
-        switch lower(char(varargin{i}))
-            case 'historicalschedules'
-                historicalSchedules = varargin{i+1};
-                i = i + 2;
-            case 'showstats'
-                showStats = varargin{i+1};
-                i = i + 2;
-            case 'savereport'
-                saveReport = varargin{i+1};
-                i = i + 2;
-            case 'reportfile'
-                reportFile = char(varargin{i+1});
-                i = i + 2;
-            otherwise
-                error('Unknown parameter: %s', char(varargin{i}));
-        end
-    else
-        i = i + 1;
-    end
-end
+% Optional parameters with validation
+addParameter(p, 'HistoricalSchedules', [], @(x) isempty(x) || (isa(x, 'containers.Map') && ~isempty(x)));
+addParameter(p, 'ShowStats', true, @(x) islogical(x) && isscalar(x));
+addParameter(p, 'SaveReport', false, @(x) islogical(x) && isscalar(x));
+addParameter(p, 'ReportFile', 'historical_analysis_report.txt', @(x) ischar(x) || isstring(x));
+
+% Parse the inputs
+parse(p, historicalData, varargin{:});
+
+% Extract parsed parameters
+historicalSchedules = p.Results.HistoricalSchedules;
+showStats = p.Results.ShowStats;
+saveReport = p.Results.SaveReport;
+reportFile = char(p.Results.ReportFile);
 
 fprintf('=== HISTORICAL DATA ANALYSIS ===\n');
 
