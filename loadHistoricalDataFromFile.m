@@ -177,6 +177,24 @@ historicalData.anesthesiaTime = rawData.(findColumn({'In_Room_to_Anesthesia_Indu
 procedureStartTimestamps = rawData.(findColumn({'Procedure_Start_Date_and_Time', 'ProcedureStartDateAndTime', 'Procedure Start Date and Time'}));
 procedureCompleteTimestamps = rawData.(findColumn({'Procedure_Complete_Date_and_Time', 'ProcedureCompleteDateAndTime', 'Procedure Complete Date and Time'}));
 
+% Filter out cases with missing start times before processing
+validStartTimeIndices = ~ismissing(procedureStartTimestamps);
+fprintf('Filtering out %d cases with missing start times (keeping %d of %d cases)\n', ...
+    sum(~validStartTimeIndices), sum(validStartTimeIndices), length(validStartTimeIndices));
+
+% Apply filter to all data fields
+fieldNames = fieldnames(historicalData);
+for i = 1:length(fieldNames)
+    field = fieldNames{i};
+    if length(historicalData.(field)) == length(validStartTimeIndices)
+        historicalData.(field) = historicalData.(field)(validStartTimeIndices);
+    end
+end
+
+% Also filter the timestamp arrays
+procedureStartTimestamps = procedureStartTimestamps(validStartTimeIndices);
+procedureCompleteTimestamps = procedureCompleteTimestamps(validStartTimeIndices);
+
 % Convert timestamps to time of day (duration from midnight)
 historicalData.procedureStartTimeOfDay = timeofday(procedureStartTimestamps);
 historicalData.procedureCompleteTimeOfDay = timeofday(procedureCompleteTimestamps);

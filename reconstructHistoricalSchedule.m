@@ -104,12 +104,30 @@ end
 
 fprintf('Reconstructing historical schedule for %s (%d cases)\n', targetDateFormatted, numMatches);
 
-% Extract matching cases
+% Extract matching cases and filter out those with missing start times
 matchingIndices = find(dateMatches);
+validStartTimeIndices = ~ismissing(historicalData.procedureStartTimeOfDay(matchingIndices));
+filteredIndices = matchingIndices(validStartTimeIndices);
+numValidCases = length(filteredIndices);
+
+if numValidCases < numMatches
+    fprintf('Filtering out %d cases with missing start times (keeping %d of %d cases)\n', ...
+        numMatches - numValidCases, numValidCases, numMatches);
+end
+
+if numValidCases == 0
+    fprintf('No cases with valid start times found for date: %s\n', targetDateFormatted);
+    historicalSchedule = struct('labs', {{}}, 'operators', containers.Map());
+    results = struct();
+    return;
+end
+
+fprintf('Reconstructing historical schedule for %s (%d valid cases)\n', targetDateFormatted, numValidCases);
+
 historicalCases = struct();
 
-for i = 1:numMatches
-    idx = matchingIndices(i);
+for i = 1:numValidCases
+    idx = filteredIndices(i);
     
     % Basic case information
     historicalCases(i).caseID = char(historicalData.caseID(idx));
@@ -155,7 +173,7 @@ end
 
 % Determine number of unique rooms used and create mapping
 if isfield(historicalData, 'room')
-    historicalRooms = historicalData.room(matchingIndices);
+    historicalRooms = historicalData.room(filteredIndices);
     historicalRooms = historicalRooms(~ismissing(historicalRooms));
     if ~isempty(historicalRooms)
         uniqueRooms = unique(historicalRooms);
@@ -199,7 +217,7 @@ historicalSchedule.labMapping = labToRoomMap; % Lab index -> actual room name
 historicalSchedule.numLabs = numLabs;
 
 % Assign cases to rooms based on historical room assignments
-for i = 1:numMatches
+for i = 1:numValidCases
     caseInfo = historicalCases(i);
     
     % Determine lab index from room assignment
@@ -275,7 +293,7 @@ results = calculateHistoricalMetrics(historicalSchedule, historicalCases, debugM
 if debugMode
     fprintf('\n=== HISTORICAL SCHEDULE RECONSTRUCTION SUMMARY ===\n');
     fprintf('Date: %s\n', targetDateFormatted);
-    fprintf('Total cases: %d\n', numMatches);
+    fprintf('Total cases: %d\n', numValidCases);
     fprintf('Labs used: %d\n', numLabs);
     
     % Show lab mapping
