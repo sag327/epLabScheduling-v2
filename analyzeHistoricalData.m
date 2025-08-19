@@ -1,198 +1,77 @@
-function historicalData = analyzeHistoricalData(varargin)
-% Loads and analyzes historical procedure data from Excel file
-% Focuses purely on data loading, cleaning, and statistical analysis
+function analyzeHistoricalData(historicalData, varargin)
+% Analyzes historical procedure data structure
+% Focuses purely on statistical analysis and insights
 % Does NOT perform any schedule reconstruction or optimization
 %
 % Usage:
-%   historicalData = analyzeHistoricalData()  % Uses default 'procedureDurationsB.xlsx'
-%   historicalData = analyzeHistoricalData('path/to/mydata.xlsx')
-%   historicalData = analyzeHistoricalData('FilePath', 'path/to/mydata.xlsx')
-%   historicalData = analyzeHistoricalData('FilePath', 'data.xlsx', 'ShowStats', false)
+%   analyzeHistoricalData(historicalData)
+%   analyzeHistoricalData(historicalData, 'ShowStats', true)
+%   analyzeHistoricalData(historicalData, 'SaveReport', true, 'ReportFile', 'analysis_report.txt')
+%
+% Inputs:
+%   historicalData - Historical data structure from loadHistoricalDataFromFile
 %
 % Parameters:
-%   FilePath - Path to Excel file containing historical procedure data
-%              Default: 'procedureDurationsB.xlsx'
 %   ShowStats - Whether to display detailed statistics (default: true)
-%   SaveData - Whether to save data to .mat file (default: true)
+%   SaveReport - Whether to save analysis report to file (default: false)
+%   ReportFile - File name for analysis report (default: 'historical_analysis_report.txt')
 %
 % Outputs:
-%   historicalData - Cleaned historical data structure with analysis
+%   None - Function displays analysis and optionally saves report
 
-% Parse input arguments
-p = inputParser;
-addOptional(p, 'FilePath', 'procedureDurationsB.xlsx', @(x) ischar(x) || isstring(x));
-addParameter(p, 'ShowStats', true, @islogical);
-addParameter(p, 'SaveData', true, @islogical);
-parse(p, varargin{:});
+% Validate input
+if ~isstruct(historicalData)
+    error('historicalData must be a structure from loadHistoricalDataFromFile');
+end
 
-filename = char(p.Results.FilePath);
-showStats = p.Results.ShowStats;
-saveData = p.Results.SaveData;
+% Set default parameters
+showStats = true;
+saveReport = false;
+reportFile = 'historical_analysis_report.txt';
+
+% Parse optional parameters
+i = 1;
+while i <= length(varargin)
+    if ischar(varargin{i}) || isstring(varargin{i})
+        switch lower(char(varargin{i}))
+            case 'showstats'
+                showStats = varargin{i+1};
+                i = i + 2;
+            case 'savereport'
+                saveReport = varargin{i+1};
+                i = i + 2;
+            case 'reportfile'
+                reportFile = char(varargin{i+1});
+                i = i + 2;
+            otherwise
+                error('Unknown parameter: %s', char(varargin{i}));
+        end
+    else
+        i = i + 1;
+    end
+end
 
 fprintf('=== HISTORICAL DATA ANALYSIS ===\n');
-fprintf('Loading historical data from Excel file: %s\n', filename);
 
-% Load the Excel file
-if ~exist(filename, 'file')
-    error('File %s not found', filename);
-end
-
-try
-    % Read with proper header row (row 10 in Excel)
-    % Use readtable with header row specification - this automatically detects data end
-    rawData = readtable(filename, 'HeaderLines', 9);
-    
-    % Remove any completely empty rows that might have been read
-    % Check for rows where all key columns are empty/NaN
-    validRows = ~(ismissing(rawData{:,1}) & ismissing(rawData{:,2}) & ismissing(rawData{:,3}));
-    rawData = rawData(validRows, :);
-    fprintf('Loaded %d records from %s\n', height(rawData), filename);
-    
-    if showStats
-        % Show actual MATLAB variable names
-        fprintf('\nColumn Analysis:\n');
-        for i = 1:length(rawData.Properties.VariableNames)
-            fprintf('  %d: %s\n', i, rawData.Properties.VariableNames{i});
-        end
-    end
-    
-catch ME
-    error('Error reading Excel file: %s', ME.message);
-end
-
-% Create cleaned data structure with human-readable field names
-historicalData = struct();
-
-% Helper function to find column dynamically
-findColumn = @(possibleNames) findColumnByName(rawData.Properties.VariableNames, possibleNames);
-
-% Basic case information
-% Find the Case ID column dynamically
-caseIDColumn = '';
-possibleCaseIDColumns = {'CaseID', 'Case_ID', 'Case ID', 'CaseId', 'case_id', 'case_ID'};
-for col = possibleCaseIDColumns
-    if ismember(col{1}, rawData.Properties.VariableNames)
-        caseIDColumn = col{1};
-        break;
+% Validate that required fields exist
+requiredFields = {'caseID', 'date', 'surgeon', 'procedure'};
+for i = 1:length(requiredFields)
+    if ~isfield(historicalData, requiredFields{i})
+        error('Missing required field in historicalData: %s', requiredFields{i});
     end
 end
 
-% If not found by exact match, try partial matching
-if isempty(caseIDColumn)
-    caseIDColumns = rawData.Properties.VariableNames(contains(lower(rawData.Properties.VariableNames), 'case'));
-    if ~isempty(caseIDColumns)
-        caseIDColumn = caseIDColumns{1}; % Use first match
-    end
-end
-
-if isempty(caseIDColumn)
-    error('Could not find Case ID column in the data');
-end
-
-fprintf('Using Case ID column: %s\n', caseIDColumn);
-
-% Clean caseID field to handle encoding issues
-cleanCaseIDs = string(rawData.(caseIDColumn));
-% Remove any non-printable characters
-for i = 1:length(cleanCaseIDs)
-    if ismissing(cleanCaseIDs(i)) || strlength(cleanCaseIDs(i)) == 0
-        cleanCaseIDs(i) = sprintf('Case_%d', i);
-    else
-        % Remove non-ASCII characters that might cause display issues
-        cleanStr = regexprep(char(cleanCaseIDs(i)), '[^\x20-\x7E]', '');
-        if isempty(cleanStr)
-            cleanCaseIDs(i) = sprintf('Case_%d', i);
-        else
-            cleanCaseIDs(i) = string(cleanStr);
-        end
-    end
-end
-
-historicalData.caseID = cleanCaseIDs;
-historicalData.date = rawData.Date;
-historicalData.surgeon = rawData.(findColumn({'Primary_Surgeon', 'PrimarySurgeon', 'Primary Surgeon'}));
-historicalData.procedure = rawData.(findColumn({'Procedure_Primary', 'Procedure_Primary_', 'Procedure (Primary)'}));
-historicalData.service = rawData.Service;
-historicalData.location = rawData.(findColumn({'Case_Location', 'CaseLocation', 'Case Location'}));
-historicalData.room = rawData.(findColumn({'Room'}));
-
-% Admission status (inpatient/outpatient)
-% Try multiple possible column names for admission status
-admissionColumn = '';
-possibleColumns = {'Admission_Patient_Class', 'AdmissionPatientClass', 'Admission Patient Class', 'SlicesByAdmissionPatientClass', 'SlicesbyAdmissionPatientClass', 'Slices by Admission Patient Class', 'AdmissionStatus', 'Admission Status'};
-
-for col = possibleColumns
-    if ismember(col{1}, rawData.Properties.VariableNames)
-        admissionColumn = col{1};
-        break;
-    end
-end
-
-if ~isempty(admissionColumn)
-    historicalData.admissionStatus = rawData.(admissionColumn);
-    fprintf('Using admission status from column: %s\n', admissionColumn);
-else
-    % Default to empty if not present in file
-    historicalData.admissionStatus = strings(height(rawData), 1);
-    fprintf('Warning: No admission status column found, using empty values\n');
-end
-
-% Time measurements (all in minutes)
-historicalData.setupTime = rawData.(findColumn({'In_Room_to_Procedure_Start_Minutes', 'InRoomToProcedureStart_Minutes_', 'In Room to Procedure Start (Minutes)'}));
-historicalData.procedureTime = rawData.(findColumn({'Procedure_Start_to_Procedure_Complete_Minutes', 'ProcedureStartToProcedureComplete_Minutes_', 'Procedure Start to Procedure Complete (Minutes)'}));
-historicalData.postTime = rawData.(findColumn({'Procedure_Complete_to_Out_of_Room_Minutes', 'ProcedureCompleteToOutOfRoom_Minutes_', 'Procedure Complete to Out of Room (Minutes)'}));
-historicalData.totalRoomTime = rawData.(findColumn({'In_Room_to_Out_of_Room_Minutes', 'InRoomToOutOfRoom_Minutes_', 'In Room to Out of Room (Minutes)'}));
-historicalData.anesthesiaTime = rawData.(findColumn({'In_Room_to_Anesthesia_Induction_Minutes', 'InRoomToAnesthesiaInduction_Minutes_', 'In Room to Anesthesia Induction (Minutes)'}));
-
-% Extract procedure start and end times (time of day only)
-procedureStartTimestamps = rawData.(findColumn({'Procedure_Start_Date_and_Time', 'ProcedureStartDateAndTime', 'Procedure Start Date and Time'}));
-procedureCompleteTimestamps = rawData.(findColumn({'Procedure_Complete_Date_and_Time', 'ProcedureCompleteDateAndTime', 'Procedure Complete Date and Time'}));
-
-% Filter out cases with missing start times before processing
-validStartTimeIndices = ~ismissing(procedureStartTimestamps);
-fprintf('Filtering out %d cases with missing start times (keeping %d of %d cases)\n', ...
-    sum(~validStartTimeIndices), sum(validStartTimeIndices), length(validStartTimeIndices));
-
-% Apply filter to all data fields
-fieldNames = fieldnames(historicalData);
-for i = 1:length(fieldNames)
-    field = fieldNames{i};
-    if length(historicalData.(field)) == length(validStartTimeIndices)
-        historicalData.(field) = historicalData.(field)(validStartTimeIndices);
-    end
-end
-
-% Also filter the timestamp arrays
-procedureStartTimestamps = procedureStartTimestamps(validStartTimeIndices);
-procedureCompleteTimestamps = procedureCompleteTimestamps(validStartTimeIndices);
-
-% Convert timestamps to time of day (duration from midnight)
-historicalData.procedureStartTimeOfDay = timeofday(procedureStartTimestamps);
-historicalData.procedureCompleteTimeOfDay = timeofday(procedureCompleteTimestamps);
-
-% Also keep full timestamps for reference
-historicalData.procedureStartTimestamp = procedureStartTimestamps;
-historicalData.procedureCompleteTimestamp = procedureCompleteTimestamps;
+fprintf('Analyzing historical data structure with %d cases\n', length(historicalData.caseID));
 
 % Perform detailed statistical analysis
 if showStats
     performDetailedAnalysis(historicalData);
 end
 
-% Save data if requested
-if saveData
-    % Save to .mat file
-    outputFile = './data/historicalEPData_analysis.mat';
-    if ~isfolder('./data')
-        mkdir('./data');
-    end
-    save(outputFile, 'historicalData');
-    fprintf('\nAnalysis data saved to %s\n', outputFile);
-    
-    % Create and save field descriptions
-    fieldDescriptions = createFieldDescriptions();
-    save('./data/historicalEPDataDescriptions_analysis.mat', 'fieldDescriptions');
-    fprintf('Field descriptions saved to historicalEPDataDescriptions_analysis.mat\n');
+% Save analysis report if requested
+if saveReport
+    saveAnalysisReport(historicalData, reportFile);
+    fprintf('\nAnalysis report saved to %s\n', reportFile);
 end
 
 fprintf('\nHistorical data analysis complete!\n');
@@ -335,38 +214,19 @@ function performDetailedAnalysis(historicalData)
 end
 
 %% Helper Functions
-function columnName = findColumnByName(availableColumns, possibleNames)
-% Helper function to find a column by trying multiple possible names
-columnName = '';
-for name = possibleNames
-    if ismember(name{1}, availableColumns)
-        columnName = name{1};
-        return;
-    end
-end
-if isempty(columnName)
-    error('Could not find column matching any of: %s', strjoin(possibleNames, ', '));
-end
-end
+function saveAnalysisReport(historicalData, reportFile)
+% Save analysis report to text file
+fprintf('Saving analysis report to %s...\n', reportFile);
 
-function fieldDescriptions = createFieldDescriptions()
-% Create field description structure
-fieldDescriptions = struct();
-fieldDescriptions.caseID = 'Unique case identifier';
-fieldDescriptions.date = 'Procedure date';
-fieldDescriptions.surgeon = 'Primary surgeon/operator';
-fieldDescriptions.procedure = 'Type of procedure performed';
-fieldDescriptions.service = 'Medical service (typically Cardiovascular)';
-fieldDescriptions.location = 'EP lab location';
-fieldDescriptions.room = 'Room assignment for the procedure';
-fieldDescriptions.admissionStatus = 'Patient admission status (Hospital Outpatient Surgery/Inpatient/etc.)';
-fieldDescriptions.setupTime = 'Time from room entry to procedure start (minutes)';
-fieldDescriptions.procedureTime = 'Actual procedure duration (minutes)';
-fieldDescriptions.postTime = 'Time from procedure end to room exit (minutes)';
-fieldDescriptions.totalRoomTime = 'Total time in room (minutes)';
-fieldDescriptions.anesthesiaTime = 'Time from room entry to anesthesia induction (minutes)';
-fieldDescriptions.procedureStartTimeOfDay = 'Time of day when procedure started (duration from midnight)';
-fieldDescriptions.procedureCompleteTimeOfDay = 'Time of day when procedure completed (duration from midnight)';
-fieldDescriptions.procedureStartTimestamp = 'Full timestamp when procedure started';
-fieldDescriptions.procedureCompleteTimestamp = 'Full timestamp when procedure completed';
+% Redirect output to file
+diary(reportFile);
+diary on;
+
+fprintf('=== HISTORICAL DATA ANALYSIS REPORT ===\n');
+fprintf('Generated on: %s\n\n', datestr(now));
+
+% Perform the same analysis as displayed
+performDetailedAnalysis(historicalData);
+
+diary off;
 end
