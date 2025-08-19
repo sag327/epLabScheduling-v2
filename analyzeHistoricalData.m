@@ -1,17 +1,18 @@
 function analyzeHistoricalData(historicalData, varargin)
-% Analyzes historical procedure data structure
-% Focuses purely on statistical analysis and insights
+% Analyzes historical procedure data and schedule structures
+% Focuses on statistical analysis, schedule performance, and operator insights
 % Does NOT perform any schedule reconstruction or optimization
 %
 % Usage:
 %   analyzeHistoricalData(historicalData)
-%   analyzeHistoricalData(historicalData, 'ShowStats', true)
-%   analyzeHistoricalData(historicalData, 'SaveReport', true, 'ReportFile', 'analysis_report.txt')
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules)
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, 'ShowStats', true)
 %
 % Inputs:
 %   historicalData - Historical data structure from loadHistoricalDataFromFile
 %
 % Parameters:
+%   HistoricalSchedules - Historical schedules structure (optional)
 %   ShowStats - Whether to display detailed statistics (default: true)
 %   SaveReport - Whether to save analysis report to file (default: false)
 %   ReportFile - File name for analysis report (default: 'historical_analysis_report.txt')
@@ -25,6 +26,7 @@ if ~isstruct(historicalData)
 end
 
 % Set default parameters
+historicalSchedules = [];
 showStats = true;
 saveReport = false;
 reportFile = 'historical_analysis_report.txt';
@@ -34,6 +36,9 @@ i = 1;
 while i <= length(varargin)
     if ischar(varargin{i}) || isstring(varargin{i})
         switch lower(char(varargin{i}))
+            case 'historicalschedules'
+                historicalSchedules = varargin{i+1};
+                i = i + 2;
             case 'showstats'
                 showStats = varargin{i+1};
                 i = i + 2;
@@ -66,6 +71,11 @@ fprintf('Analyzing historical data structure with %d cases\n', length(historical
 % Perform detailed statistical analysis
 if showStats
     performDetailedAnalysis(historicalData);
+    
+    % Perform schedule analysis if historical schedules are provided
+    if ~isempty(historicalSchedules)
+        performScheduleAnalysis(historicalData, historicalSchedules);
+    end
 end
 
 % Save analysis report if requested
@@ -210,6 +220,302 @@ function performDetailedAnalysis(historicalData)
         end
     else
         fprintf('  No admission status data available\n');
+    end
+end
+
+%% Schedule Analysis Function
+function performScheduleAnalysis(historicalData, historicalSchedules)
+    fprintf('\n=== HISTORICAL SCHEDULE ANALYSIS ===\n');
+    
+    % Extract all schedule data
+    scheduleKeys = keys(historicalSchedules);
+    numSchedules = length(scheduleKeys);
+    
+    fprintf('\nSchedule Overview:\n');
+    fprintf('  Total dates with schedules: %d\n', numSchedules);
+    
+    if numSchedules == 0
+        fprintf('  No schedules available for analysis\n');
+        return;
+    end
+    
+    % Initialize aggregation variables
+    allOperatorIdleTimes = [];
+    allLabUtilizations = [];
+    allMakespans = [];
+    allScheduleSpans = [];
+    overtimeDays = 0;
+    totalDailyOvertime = 0;
+    
+    % Collect operator and room performance data
+    operatorStats = containers.Map();
+    roomStats = containers.Map();
+    
+    fprintf('\n--- Daily Schedule Performance ---\n');
+    
+    for i = 1:numSchedules
+        scheduleKey = scheduleKeys{i};
+        scheduleData = historicalSchedules(scheduleKey);
+        
+        if ~isfield(scheduleData, 'results') || ~isfield(scheduleData, 'schedule')
+            continue;
+        end
+        
+        results = scheduleData.results;
+        schedule = scheduleData.schedule;
+        
+        % Aggregate schedule metrics
+        if isfield(results, 'makespan')
+            allMakespans = [allMakespans, results.makespan];
+        end
+        if isfield(results, 'meanLabUtilization')
+            allLabUtilizations = [allLabUtilizations, results.meanLabUtilization];
+        end
+        if isfield(results, 'scheduleEnd') && results.scheduleEnd/60 > 18
+            overtimeDays = overtimeDays + 1;
+            totalDailyOvertime = totalDailyOvertime + (results.scheduleEnd/60 - 18);
+        end
+        
+        % Analyze operator performance for this day
+        if isfield(schedule, 'operators')
+            analyzeOperatorPerformance(schedule.operators, operatorStats);
+        end
+        
+        % Analyze room utilization for this day
+        if isfield(schedule, 'labs')
+            analyzeRoomUtilization(schedule.labs, roomStats, scheduleKey);
+        end
+    end
+    
+    % Display aggregate schedule statistics
+    if ~isempty(allMakespans)
+        fprintf('Average daily makespan: %.1f hours (range: %.1f - %.1f)\n', ...
+            mean(allMakespans)/60, min(allMakespans)/60, max(allMakespans)/60);
+    end
+    
+    if ~isempty(allLabUtilizations)
+        fprintf('Average lab utilization: %.1f%% (range: %.1f%% - %.1f%%)\n', ...
+            mean(allLabUtilizations)*100, min(allLabUtilizations)*100, max(allLabUtilizations)*100);
+    end
+    
+    fprintf('Overtime days: %d of %d (%.1f%%)\n', overtimeDays, numSchedules, (overtimeDays/numSchedules)*100);
+    if overtimeDays > 0
+        fprintf('Average daily overtime: %.1f hours\n', totalDailyOvertime/overtimeDays);
+    end
+    
+    % Display operator performance analysis
+    displayOperatorAnalysis(operatorStats);
+    
+    % Display room utilization analysis
+    displayRoomAnalysis(roomStats);
+    
+    % Perform procedure duration analysis by operator
+    performProcedureDurationAnalysis(historicalData);
+end
+
+function analyzeOperatorPerformance(operators, operatorStats)
+    operatorNames = keys(operators);
+    
+    for i = 1:length(operatorNames)
+        opName = operatorNames{i};
+        opSchedule = operators(opName);
+        
+        if ~isKey(operatorStats, opName)
+            operatorStats(opName) = struct('totalCases', 0, 'totalIdleTime', 0, 'totalWorkTime', 0, 'days', 0);
+        end
+        
+        stats = operatorStats(opName);
+        
+        % Count cases for this operator on this day
+        try
+            if isstruct(opSchedule) && length(opSchedule) == 1
+                % Single case struct
+                if isfield(opSchedule, 'caseInfo')
+                    numCases = 1;
+                    if isfield(opSchedule.caseInfo, 'procTime')
+                        totalProcTime = opSchedule.caseInfo.procTime;
+                    else
+                        totalProcTime = 0;
+                    end
+                else
+                    numCases = 1;
+                    totalProcTime = 0;
+                end
+            elseif isstruct(opSchedule) && length(opSchedule) > 1
+                % Array of structs
+                numCases = length(opSchedule);
+                totalProcTime = 0;
+                for j = 1:length(opSchedule)
+                    if isfield(opSchedule(j), 'caseInfo') && isfield(opSchedule(j).caseInfo, 'procTime')
+                        totalProcTime = totalProcTime + opSchedule(j).caseInfo.procTime;
+                    end
+                end
+            else
+                numCases = 0;
+                totalProcTime = 0;
+            end
+        catch
+            numCases = 0;
+            totalProcTime = 0;
+        end
+        
+        stats.totalCases = stats.totalCases + numCases;
+        stats.totalWorkTime = stats.totalWorkTime + totalProcTime;
+        stats.days = stats.days + 1;
+        
+        operatorStats(opName) = stats;
+    end
+end
+
+function analyzeRoomUtilization(labs, roomStats, dateKey)
+    for labIdx = 1:length(labs)
+        if ~isempty(labs{labIdx})
+            labKey = sprintf('Lab_%d', labIdx);
+            
+            if ~isKey(roomStats, labKey)
+                roomStats(labKey) = struct('totalCases', 0, 'totalActiveTime', 0, 'days', 0, 'utilizationSum', 0);
+            end
+            
+            stats = roomStats(labKey);
+            labCases = labs{labIdx};
+            
+            if ~isempty(labCases)
+                stats.totalCases = stats.totalCases + length(labCases);
+                
+                % Calculate active time for this lab on this day
+                if length(labCases) > 0
+                    activeTime = labCases(end).endTime - labCases(1).startTime;
+                    stats.totalActiveTime = stats.totalActiveTime + activeTime;
+                end
+                
+                stats.days = stats.days + 1;
+            end
+            
+            roomStats(labKey) = stats;
+        end
+    end
+end
+
+function displayOperatorAnalysis(operatorStats)
+    fprintf('\n--- Operator Performance Analysis ---\n');
+    
+    if isempty(operatorStats)
+        fprintf('No operator data available\n');
+        return;
+    end
+    
+    operatorNames = keys(operatorStats);
+    
+    % Sort operators by total cases
+    operatorCases = zeros(length(operatorNames), 1);
+    for i = 1:length(operatorNames)
+        stats = operatorStats(operatorNames{i});
+        operatorCases(i) = stats.totalCases;
+    end
+    [~, sortIdx] = sort(operatorCases, 'descend');
+    
+    fprintf('Operator workload summary:\n');
+    for i = 1:min(10, length(sortIdx))
+        idx = sortIdx(i);
+        opName = operatorNames{idx};
+        stats = operatorStats(opName);
+        
+        avgCasesPerDay = stats.totalCases / stats.days;
+        avgWorkTimePerDay = stats.totalWorkTime / stats.days;
+        
+        fprintf('  %s: %d cases over %d days (avg %.1f cases/day, %.1f min work/day)\n', ...
+            opName, stats.totalCases, stats.days, avgCasesPerDay, avgWorkTimePerDay);
+    end
+end
+
+function displayRoomAnalysis(roomStats)
+    fprintf('\n--- Room Utilization Analysis ---\n');
+    
+    if isempty(roomStats)
+        fprintf('No room data available\n');
+        return;
+    end
+    
+    roomNames = keys(roomStats);
+    
+    fprintf('Room usage summary:\n');
+    for i = 1:length(roomNames)
+        roomName = roomNames{i};
+        stats = roomStats(roomName);
+        
+        if stats.days > 0
+            avgCasesPerDay = stats.totalCases / stats.days;
+            avgActiveTimePerDay = stats.totalActiveTime / stats.days;
+            
+            fprintf('  %s: %d cases over %d days (avg %.1f cases/day, %.1f hours active/day)\n', ...
+                roomName, stats.totalCases, stats.days, avgCasesPerDay, avgActiveTimePerDay/60);
+        end
+    end
+end
+
+function performProcedureDurationAnalysis(historicalData)
+    fprintf('\n--- Procedure Duration Analysis by Operator ---\n');
+    
+    % Get unique procedures and operators
+    uniqueProcedures = unique(historicalData.procedure);
+    uniqueOperators = unique(historicalData.surgeon);
+    
+    fprintf('\nProcedure duration statistics:\n');
+    
+    % Overall procedure statistics
+    for i = 1:min(10, length(uniqueProcedures))
+        procedure = uniqueProcedures{i};
+        procedureIndices = strcmp(historicalData.procedure, procedure);
+        procedureTimes = historicalData.procedureTime(procedureIndices);
+        validTimes = procedureTimes(~isnan(procedureTimes) & procedureTimes > 0);
+        
+        if ~isempty(validTimes)
+            p50 = prctile(validTimes, 50);
+            p75 = prctile(validTimes, 75);
+            p90 = prctile(validTimes, 90);
+            
+            fprintf('  %s (%d cases): P50=%.1f, P75=%.1f, P90=%.1f min\n', ...
+                procedure, length(validTimes), p50, p75, p90);
+        end
+    end
+    
+    % Operator-specific procedure analysis for top operators
+    fprintf('\n--- Operator-Specific Procedure Analysis ---\n');
+    
+    % Get top 5 operators by case count
+    operatorCounts = zeros(length(uniqueOperators), 1);
+    for i = 1:length(uniqueOperators)
+        operatorCounts(i) = sum(strcmp(historicalData.surgeon, uniqueOperators{i}));
+    end
+    [~, sortIdx] = sort(operatorCounts, 'descend');
+    topOperators = uniqueOperators(sortIdx(1:min(5, length(sortIdx))));
+    
+    for opIdx = 1:length(topOperators)
+        operator = topOperators{opIdx};
+        operatorIndices = strcmp(historicalData.surgeon, operator);
+        
+        fprintf('\n%s:\n', operator);
+        
+        % Get procedures for this operator
+        operatorProcedures = unique(historicalData.procedure(operatorIndices));
+        
+        for procIdx = 1:min(5, length(operatorProcedures))
+            procedure = operatorProcedures{procIdx};
+            
+            % Get times for this operator and procedure combination
+            combinedIndices = operatorIndices & strcmp(historicalData.procedure, procedure);
+            procedureTimes = historicalData.procedureTime(combinedIndices);
+            validTimes = procedureTimes(~isnan(procedureTimes) & procedureTimes > 0);
+            
+            if length(validTimes) >= 3  % Need at least 3 cases for meaningful percentiles
+                p50 = prctile(validTimes, 50);
+                p75 = prctile(validTimes, 75);
+                p90 = prctile(validTimes, 90);
+                
+                fprintf('  %s (%d cases): P50=%.1f, P75=%.1f, P90=%.1f min\n', ...
+                    procedure, length(validTimes), p50, p75, p90);
+            end
+        end
     end
 end
 
