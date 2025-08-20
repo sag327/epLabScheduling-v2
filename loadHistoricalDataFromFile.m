@@ -323,7 +323,7 @@ end
 %% Helper function to reconstruct all historical schedules
 function historicalSchedules = reconstructAllHistoricalSchedules(historicalData, turnoverTime, debugMode)
     % Get unique dates
-    uniqueDates = unique(string(historicalData.date));
+    uniqueDates = string(unique(historicalData.date));
     uniqueDates = uniqueDates(~ismissing(uniqueDates));
     
     fprintf('Reconstructing schedules for %d unique dates...\n', length(uniqueDates));
