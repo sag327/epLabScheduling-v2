@@ -1,4 +1,4 @@
-function visualizeSchedule(schedule, results, varargin)
+function visualizeSchedule(schedule, varargin)
 % Create a Gantt chart visualization of the optimized EP lab schedule
 %
 % Inputs:
@@ -22,7 +22,8 @@ function visualizeSchedule(schedule, results, varargin)
 % Parse input parameters
 p = inputParser;
 addRequired(p, 'schedule', @isstruct);
-addRequired(p, 'results', @isstruct);
+addOptional(p,'results',@isstruct);
+%addRequired(p, 'results', @isstruct);
 addParameter(p, 'Title', 'EP Lab Schedule', @ischar);
 addParameter(p, 'ShowLabels', true, @islogical);
 addParameter(p, 'TimeRange', [], @(x) isempty(x) || (isnumeric(x) && length(x) == 2));
@@ -31,7 +32,20 @@ addParameter(p, 'FigureSize', [1200, 800], @(x) isnumeric(x) && length(x) == 2);
 addParameter(p, 'ShowTurnover', false, @islogical);
 addParameter(p, 'Debug', false, @islogical);
 
-parse(p, schedule, results, varargin{:});
+%parse(p, schedule, results, varargin{:});
+parse(p, schedule, varargin{:});
+
+% if historicalSchedule object is passed, separate into schedule and
+% results 
+if ~exist('results')
+    if isfield(schedule,'results')
+        results = schedule.results;
+        schedule = schedule.schedule;
+    else
+        fprintf('Valid input data not provided.')
+        return;
+    end
+end
 
 % Extract parameters
 chartTitle = p.Results.Title;
