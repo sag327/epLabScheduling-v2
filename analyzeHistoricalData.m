@@ -910,8 +910,8 @@ function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips
                     currentCase = sortedSchedule(j);
                     nextCase = sortedSchedule(j+1);
                     
-                    if isfield(currentCase.caseInfo, 'endTime') && isfield(nextCase.caseInfo, 'startTime')
-                        idleTime = nextCase.caseInfo.startTime - currentCase.caseInfo.endTime;
+                    if isfield(currentCase.caseInfo, 'procEndTime') && isfield(nextCase.caseInfo, 'procStartTime')
+                        idleTime = nextCase.caseInfo.procStartTime - currentCase.caseInfo.procEndTime;
                         if idleTime > 0
                             totalIdleTime = totalIdleTime + idleTime;
                         end

@@ -14,7 +14,9 @@
       "Bash(git remote add:*)",
       "Bash(git checkout:*)",
       "Bash(source:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(timeout:*)",
+      "Bash(gtimeout:*)"
     ],
     "deny": []
   }
