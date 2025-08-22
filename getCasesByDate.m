@@ -6,8 +6,19 @@ function cases = getCasesByDate(targetDate, historicalData)
 %   historicalData - Structure from historicalEPData.mat (optional, will load if not provided)
 %
 % Output:
-%   cases - Structure array with fields suitable for EP scheduler:
-%           operator, caseID, procTime, setupTime, postTime, procedure, location
+%   cases - Structure array with fields suitable for scheduleHistoricalCases():
+%           operator, caseID, procTime, setupTime, postTime, procedure, location,
+%           service, totalRoomTime, date, admissionStatus, priority, preferredLab
+%
+% Usage Example:
+%   % Get cases for a specific date
+%   cases = getCasesByDate('2025-02-15');
+%   
+%   % Schedule the cases
+%   [schedule, results] = scheduleHistoricalCases(cases);
+%   
+%   % Visualize the schedule
+%   visualizeSchedule(schedule, results);
 
 % Load historical data if not provided
 if nargin < 2 || isempty(historicalData)

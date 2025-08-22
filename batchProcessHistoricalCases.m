@@ -13,6 +13,7 @@ function batchResults = batchProcessHistoricalCases(varargin)
 %   'SaveFile' - Output filename (default: 'batch_scheduling_results_YYYYMMDD_HHMMSS.mat')
 %   'TurnoverTime' - Room turnover time in minutes (default: 15)
 %   'CaseFilter' - 'all', 'outpatient', 'inpatient' (default: 'all')
+%   'PrioritizeOutpatient' - Schedule outpatient cases first, then remaining cases (default: false)
 %   'Debug' - Show debug output (default: false)
 %   'limitDays' - Limit analysis to a specified number of days for testing
 %   purposes 
@@ -31,6 +32,9 @@ function batchResults = batchProcessHistoricalCases(varargin)
 %   % Process all historical data with 30-minute turnover
 %   results = batchProcessHistoricalCases('TurnoverTime', 30);
 %
+%   % Process with outpatient prioritization
+%   results = batchProcessHistoricalCases('PrioritizeOutpatient', true);
+%
 %   % Process specific dataset
 %   load('myData.mat');
 %   results = batchProcessHistoricalCases('DataSource', 'variable', 'Data', myData);
@@ -47,6 +51,7 @@ addParameter(p, 'Data', struct(), @isstruct);
 addParameter(p, 'SaveFile', '', @ischar);
 addParameter(p, 'TurnoverTime', 15, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'CaseFilter', 'all', @(x) ismember(x, {'all', 'outpatient', 'inpatient'}));
+addParameter(p, 'PrioritizeOutpatient', false, @islogical);
 addParameter(p, 'Debug', false, @islogical);
 addParameter(p, 'limitDays', -1, @isnumeric);
 
@@ -58,6 +63,7 @@ userData = p.Results.Data;
 saveFile = p.Results.SaveFile;
 turnoverTime = p.Results.TurnoverTime;
 caseFilter = p.Results.CaseFilter;
+prioritizeOutpatient = p.Results.PrioritizeOutpatient;
 debugMode = p.Results.Debug;
 limitDays = p.Results.limitDays;
 
@@ -373,10 +379,11 @@ for i = 1:numDays
             [schedule, results] = scheduleHistoricalCases(dayCases, ...
                 'turnoverTime', turnoverTime, ...
                 'caseFilter', caseFilter, ...
-                'debug', false); % Suppress even in debug mode for batch
+                'prioritizeOutpatient', prioritizeOutpatient, ...
+                'verbose', false); % Suppress even in debug mode for batch
         else
             % Completely suppress output
-            evalc('[schedule, results] = scheduleHistoricalCases(dayCases, ''turnoverTime'', turnoverTime, ''caseFilter'', caseFilter);');
+            evalc('[schedule, results] = scheduleHistoricalCases(dayCases, ''turnoverTime'', turnoverTime, ''caseFilter'', caseFilter, ''prioritizeOutpatient'', prioritizeOutpatient, ''verbose'', false);');
         end
         
         % Store results
@@ -455,6 +462,7 @@ batchResults.summaryStats = summaryStats;
 batchResults.parameters = struct(...
     'turnoverTime', turnoverTime, ...
     'caseFilter', caseFilter, ...
+    'prioritizeOutpatient', prioritizeOutpatient, ...
     'dataSource', dataSource, ...
     'debugMode', debugMode, ...
     'totalDaysFound', numDays, ...
