@@ -973,7 +973,7 @@ caseData = struct();
 
 % Core identification fields
 caseData.caseID = cell(numCases, 1);
-caseData.date = cell(numCases, 1);
+caseData.date = NaT(numCases, 1);
 caseData.surgeon = cell(numCases, 1);
 
 % Procedure information
@@ -986,6 +986,13 @@ caseData.setupTime = zeros(numCases, 1);
 caseData.procedureTime = zeros(numCases, 1);
 caseData.postTime = zeros(numCases, 1);
 caseData.totalRoomTime = zeros(numCases, 1);
+caseData.anesthesiaTime = zeros(numCases, 1);
+
+% Time of day information (required by analyzeHistoricalData.m)
+caseData.procedureStartTimeOfDay = duration(NaN(numCases, 1), 0, 0);
+caseData.procedureCompleteTimeOfDay = duration(NaN(numCases, 1), 0, 0);
+caseData.procedureStartTimestamp = NaT(numCases, 1);
+caseData.procedureCompleteTimestamp = NaT(numCases, 1);
 
 % Additional optional fields
 caseData.admissionStatus = cell(numCases, 1);
@@ -1037,10 +1044,32 @@ for i = 1:numCases
     
     % Calculate total room time
     if isfield(case_data, 'totalRoomTime')
-        caseData.totalRoomTime(i) = ensureNumeric(case_data.totalRoomTime, 
+        caseData.totalRoomTime(i) = ensureNumeric(case_data.totalRoomTime, ...
             caseData.setupTime(i) + caseData.procedureTime(i) + caseData.postTime(i));
     else
         caseData.totalRoomTime(i) = caseData.setupTime(i) + caseData.procedureTime(i) + caseData.postTime(i);
+    end
+    
+    % Anesthesia time (default to setup time if not available)
+    caseData.anesthesiaTime(i) = ensureNumeric(getFieldSafe(case_data, 'anesthesiaTime'), caseData.setupTime(i));
+    
+    % Calculate time-of-day information based on scheduled times
+    if isfield(case_data, 'startTime')
+        % Parse start time from case data (expecting time in minutes from start of day)
+        startTimeMinutes = ensureNumeric(case_data.startTime, 8*60); % Default to 8 AM
+        caseData.procedureStartTimeOfDay(i) = duration(0, startTimeMinutes, 0);
+        caseData.procedureStartTimestamp(i) = caseData.date(i) + caseData.procedureStartTimeOfDay(i);
+        
+        % Calculate completion time
+        completionTimeMinutes = startTimeMinutes + caseData.setupTime(i) + caseData.procedureTime(i);
+        caseData.procedureCompleteTimeOfDay(i) = duration(0, completionTimeMinutes, 0);
+        caseData.procedureCompleteTimestamp(i) = caseData.date(i) + caseData.procedureCompleteTimeOfDay(i);
+    else
+        % Use default values if timing information is not available
+        caseData.procedureStartTimeOfDay(i) = duration(NaN, 0, 0);
+        caseData.procedureCompleteTimeOfDay(i) = duration(NaN, 0, 0);
+        caseData.procedureStartTimestamp(i) = NaT;
+        caseData.procedureCompleteTimestamp(i) = NaT;
     end
     
     % Optional fields
