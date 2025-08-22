@@ -1,5 +1,6 @@
 function cases = getCasesByDate(targetDate, historicalData)
 % Extract cases from historicalEPData for a specific date
+% Version: 2.1.0
 % 
 % Inputs:
 %   targetDate - Date string (e.g., '2025-02-15') or datetime object

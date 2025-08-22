@@ -1,6 +1,7 @@
 function plotAnalysisResults(analysisResults)
 % Create subplots showing operator performance metrics from multi-procedure days
 % Uses pre-calculated flip-to-turnover ratios and correlates with selected procedure metrics
+% Version: 2.1.0
 % Input: analysisResults - structure returned by analyzeHistoricalData
 
 if ~isfield(analysisResults, 'operatorAnalysis') || ...

@@ -1,5 +1,6 @@
 function visualizeSchedule(schedule, varargin)
 % Create a Gantt chart visualization of the optimized EP lab schedule
+% Version: 2.1.0
 %
 % Inputs:
 %   schedule - Schedule structure from scheduleHistoricalCases()

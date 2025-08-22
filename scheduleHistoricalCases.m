@@ -1,5 +1,6 @@
 function [schedule, results] = scheduleHistoricalCases(cases, varargin)
 % Optimal scheduling of EP cases using integer linear programming
+% Version: 2.1.0
 %
 % Inputs:
 %   cases - Structure array from getCasesByDate.m

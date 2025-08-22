@@ -1,5 +1,6 @@
 function batchResults = batchProcessHistoricalCases(varargin)
 % Batch process historical EP cases data by running scheduleHistoricalCases for each day
+% Version: 2.1.0
 %
 % Usage:
 %   batchResults = batchProcessHistoricalCases()  % Interactive mode - prompts for data source
@@ -71,6 +72,11 @@ fprintf('=== EP Lab Batch Scheduling Processor ===\n\n');
 
 % Start timing
 startTime = tic;
+
+% Create log file and collect version information
+logFile = createLogFile();
+logVersionInfo(logFile);
+logParameters(logFile, turnoverTime, caseFilter, prioritizeOutpatient, dataSource, debugMode, limitDays);
 
 % Get historical data based on source
 switch dataSource
@@ -523,6 +529,201 @@ end
 fprintf('\nResults saved to: %s\n', saveFile);
 fprintf('Batch processing complete!\n');
 
+% Log completion and results summary
+logCompletion(logFile, batchResults, toc(startTime));
+
+end
+
+%% Logging Functions
+
+function logFile = createLogFile()
+% Create a log file with timestamp
+timestamp = datestr(now, 'yyyymmdd_HHMMSS');
+logFile = sprintf('batch_processing_log_%s.txt', timestamp);
+fid = fopen(logFile, 'w');
+if fid == -1
+    warning('Could not create log file: %s. Logging to console instead.', logFile);
+    logFile = '';
+    return;
+end
+
+% Write header
+fprintf(fid, '=================================================================\n');
+fprintf(fid, 'EP Lab Batch Processing Log\n');
+fprintf(fid, 'Generated: %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+fprintf(fid, '=================================================================\n\n');
+fclose(fid);
+
+fprintf('Created log file: %s\n', logFile);
+end
+
+function logVersionInfo(logFile)
+% Log version information for all key scripts
+if isempty(logFile)
+    return;
+end
+
+fid = fopen(logFile, 'a');
+if fid == -1
+    return;
+end
+
+fprintf(fid, 'SCRIPT VERSIONS:\n');
+fprintf(fid, '================\n');
+
+try
+    % Get version information from key scripts
+    versions = getScriptVersions();
+    fieldNames = fieldnames(versions);
+    for i = 1:length(fieldNames)
+        scriptName = fieldNames{i};
+        version = versions.(scriptName);
+        fprintf(fid, '%-30s: %s\n', scriptName, version);
+    end
+catch ME
+    fprintf(fid, 'Error getting script versions: %s\n', ME.message);
+end
+
+fprintf(fid, '\n');
+fclose(fid);
+end
+
+function logParameters(logFile, turnoverTime, caseFilter, prioritizeOutpatient, dataSource, debugMode, limitDays)
+% Log processing parameters
+if isempty(logFile)
+    return;
+end
+
+fid = fopen(logFile, 'a');
+if fid == -1
+    return;
+end
+
+fprintf(fid, 'PROCESSING PARAMETERS:\n');
+fprintf(fid, '=====================\n');
+fprintf(fid, 'Data Source:           %s\n', dataSource);
+fprintf(fid, 'Turnover Time:         %d minutes\n', turnoverTime);
+fprintf(fid, 'Case Filter:           %s\n', caseFilter);
+fprintf(fid, 'Prioritize Outpatient: %s\n', string(prioritizeOutpatient));
+fprintf(fid, 'Debug Mode:            %s\n', string(debugMode));
+if limitDays > 0
+    fprintf(fid, 'Limited Days:          %d\n', limitDays);
+else
+    fprintf(fid, 'Limited Days:          No limit\n');
+end
+fprintf(fid, '\n');
+
+fclose(fid);
+end
+
+function logCompletion(logFile, batchResults, processingTime)
+% Log completion summary and results
+if isempty(logFile)
+    return;
+end
+
+fid = fopen(logFile, 'a');
+if fid == -1
+    return;
+end
+
+fprintf(fid, 'PROCESSING RESULTS:\n');
+fprintf(fid, '==================\n');
+fprintf(fid, 'Total Processing Time: %.2f seconds\n', processingTime);
+fprintf(fid, 'Processed Dates:       %d\n', length(batchResults.processedDates));
+fprintf(fid, 'Successful Days:       %d\n', batchResults.parameters.successfulDays);
+fprintf(fid, 'Failed Days:           %d\n', batchResults.parameters.failedDays);
+
+if isfield(batchResults, 'summaryStats')
+    stats = batchResults.summaryStats;
+    if isfield(stats, 'numDaysProcessed')
+        fprintf(fid, 'Days Processed:        %d\n', stats.numDaysProcessed);
+    end
+    if isfield(stats, 'avgCasesPerDay')
+        fprintf(fid, 'Avg Cases per Day:     %.1f\n', stats.avgCasesPerDay);
+    end
+    if isfield(stats, 'avgMakespan')
+        fprintf(fid, 'Avg Makespan:          %.1f hours\n', stats.avgMakespan / 60);
+    end
+    if isfield(stats, 'avgLabUtilization')
+        fprintf(fid, 'Avg Lab Utilization:   %.1f%%\n', stats.avgLabUtilization * 100);
+    end
+end
+
+% Log any processing errors
+if isfield(batchResults, 'processingErrors') && ~isempty(batchResults.processingErrors)
+    fprintf(fid, '\nPROCESSING ERRORS:\n');
+    fprintf(fid, '=================\n');
+    for i = 1:length(batchResults.processingErrors)
+        fprintf(fid, 'Error %d: %s\n', i, batchResults.processingErrors{i});
+    end
+end
+
+fprintf(fid, '\nLog completed: %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+fprintf(fid, '=================================================================\n');
+
+fclose(fid);
+fprintf('Processing log saved to: %s\n', logFile);
+end
+
+function versions = getScriptVersions()
+% Extract version numbers from key scripts
+versions = struct();
+
+% List of key scripts to check
+scripts = {
+    'batchProcessHistoricalCases.m'
+    'scheduleHistoricalCases.m'
+    'analyzeHistoricalData.m'
+    'plotAnalysisResults.m'
+    'getCasesByDate.m'
+    'visualizeSchedule.m'
+};
+
+for i = 1:length(scripts)
+    scriptName = scripts{i};
+    [~, name, ~] = fileparts(scriptName);
+    
+    try
+        % Read the first few lines of the script to find version
+        if exist(scriptName, 'file')
+            fid = fopen(scriptName, 'r');
+            if fid == -1
+                versions.(matlab.lang.makeValidName(name)) = 'File Open Error';
+                continue;
+            end
+            
+            version = 'Unknown';
+            
+            for j = 1:10  % Check first 10 lines
+                line = fgetl(fid);
+                if ischar(line) && contains(line, 'Version:')
+                    % Extract version number
+                    versionMatch = regexp(line, 'Version:\s*([^\s]+)', 'tokens');
+                    if ~isempty(versionMatch)
+                        version = versionMatch{1}{1};
+                        break;
+                    end
+                end
+            end
+            fclose(fid);
+            versions.(matlab.lang.makeValidName(name)) = version;
+        else
+            versions.(matlab.lang.makeValidName(name)) = 'Not Found';
+        end
+    catch ME
+        versions.(matlab.lang.makeValidName(name)) = sprintf('Error: %s', ME.message);
+    end
+end
+
+% Add MATLAB version
+try
+    matlabVersion = version('-release');
+    versions.MATLAB_Version = matlabVersion;
+catch ME
+    versions.MATLAB_Version = sprintf('Unknown (%s)', ME.message);
+end
+versions.Computer_Architecture = computer;
 end
 
 %% Helper function to calculate summary statistics

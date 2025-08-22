@@ -2,6 +2,7 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 % Analyzes historical procedure data and schedule structures
 % Provides comprehensive statistical analysis, schedule performance metrics, 
 % and operator insights for EP lab operations
+% Version: 2.1.0
 %
 % Syntax:
 %   analyzeHistoricalData(historicalData)
