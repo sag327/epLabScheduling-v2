@@ -202,6 +202,8 @@ function [datasetSummary, procedureAnalysis, surgeonAnalysis, timeAnalysis, room
     procedureAnalysis.procedures = procedures;
     procedureAnalysis.counts = counts;
     procedureAnalysis.percentages = (counts / datasetSummary.totalCases) * 100;
+    procedureAnalysis.countsStd = std(counts);
+    procedureAnalysis.percentagesStd = std(procedureAnalysis.percentages);
     
     if showStats
         fprintf('\n--- Procedure Type Analysis ---\n');
@@ -224,6 +226,8 @@ function [datasetSummary, procedureAnalysis, surgeonAnalysis, timeAnalysis, room
     surgeonAnalysis.surgeons = surgeons;
     surgeonAnalysis.caseCounts = surgeonCounts;
     surgeonAnalysis.percentages = (surgeonCounts / length(historicalData.caseID)) * 100;
+    surgeonAnalysis.caseCountsStd = std(surgeonCounts);
+    surgeonAnalysis.percentagesStd = std(surgeonAnalysis.percentages);
     
     if showStats
         fprintf('Top 5 Most Active Surgeons:\n');
@@ -325,6 +329,8 @@ function [datasetSummary, procedureAnalysis, surgeonAnalysis, timeAnalysis, room
         roomAnalysis.caseCounts = roomCounts;
         roomAnalysis.percentages = (roomCounts / length(validRooms)) * 100;
         roomAnalysis.totalValidRooms = length(validRooms);
+        roomAnalysis.caseCountsStd = std(roomCounts);
+        roomAnalysis.percentagesStd = std(roomAnalysis.percentages);
         
         if showStats
             fprintf('Room Usage Distribution:\n');
@@ -338,6 +344,8 @@ function [datasetSummary, procedureAnalysis, surgeonAnalysis, timeAnalysis, room
         roomAnalysis.caseCounts = [];
         roomAnalysis.percentages = [];
         roomAnalysis.totalValidRooms = 0;
+        roomAnalysis.caseCountsStd = NaN;
+        roomAnalysis.percentagesStd = NaN;
         
         if showStats
             fprintf('  No room assignment data available\n');
@@ -531,13 +539,13 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     
     % Display aggregate schedule statistics
     if ~isempty(allMakespans)
-        fprintf('Average daily makespan: %.1f hours (range: %.1f - %.1f)\n', ...
-            mean(allMakespans)/60, min(allMakespans)/60, max(allMakespans)/60);
+        fprintf('Average daily makespan: %.1f±%.1f hours (range: %.1f - %.1f)\n', ...
+            mean(allMakespans)/60, std(allMakespans)/60, min(allMakespans)/60, max(allMakespans)/60);
     end
     
     if ~isempty(allLabUtilizations)
-        fprintf('Average lab utilization: %.1f%% (range: %.1f%% - %.1f%%)\n', ...
-            mean(allLabUtilizations)*100, min(allLabUtilizations)*100, max(allLabUtilizations)*100);
+        fprintf('Average lab utilization: %.1f±%.1f%% (range: %.1f%% - %.1f%%)\n', ...
+            mean(allLabUtilizations)*100, std(allLabUtilizations)*100, min(allLabUtilizations)*100, max(allLabUtilizations)*100);
     end
     
     fprintf('Overtime days: %d of %d (%.1f%%)\n', overtimeDays, numSchedules, (overtimeDays/numSchedules)*100);
@@ -557,8 +565,10 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     
     % Populate structured return values
     scheduleAnalysis.avgMakespan = mean(allMakespans);
+    scheduleAnalysis.makespanStd = std(allMakespans);
     scheduleAnalysis.makespanRange = [min(allMakespans), max(allMakespans)];
     scheduleAnalysis.avgLabUtilization = mean(allLabUtilizations);
+    scheduleAnalysis.labUtilizationStd = std(allLabUtilizations);
     scheduleAnalysis.utilizationRange = [min(allLabUtilizations), max(allLabUtilizations)];
     scheduleAnalysis.overtimeDays = overtimeDays;
     scheduleAnalysis.overtimePercentage = (overtimeDays/numSchedules)*100;
@@ -576,6 +586,7 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     labFlipAnalysis.operatorFlipStats = operatorFlipStats;
     labFlipAnalysis.dailyLabFlips = dailyLabFlips;
     labFlipAnalysis.avgDailyFlips = mean(dailyLabFlips);
+    labFlipAnalysis.dailyFlipsStd = std(dailyLabFlips);
     labFlipAnalysis.totalFlips = sum(dailyLabFlips);
     labFlipAnalysis.analyzedDates = scheduleKeys;
 end
@@ -606,24 +617,49 @@ function averages = calculateMultiProcedureAverages(operatorCaseStats, operatorI
         % Initialize averages for this operator
         opAverages = struct();
         opAverages.avgIdleTime = NaN;
+        opAverages.medianIdleTime = NaN;
         opAverages.avgFlips = NaN;
+        opAverages.avgCasesPerMultiProcDay = NaN;
+        opAverages.flipToTurnoverRatio = NaN;
         opAverages.multiProcedureDays = sum(multiProcDayMask);
         
         if any(multiProcDayMask)
             % Calculate averages only for multi-procedure days
             multiProcIdleTimes = idleArray(multiProcDayMask);
             multiProcFlips = flipArray(multiProcDayMask);
+            multiProcCases = caseArray(multiProcDayMask);
             
             % Only calculate averages if we have valid (non-NaN) data
             validIdleTimes = multiProcIdleTimes(~isnan(multiProcIdleTimes));
             validFlips = multiProcFlips(~isnan(multiProcFlips));
+            validCases = multiProcCases(~isnan(multiProcCases));
             
             if ~isempty(validIdleTimes)
                 opAverages.avgIdleTime = mean(validIdleTimes);
+                opAverages.medianIdleTime = median(validIdleTimes);
             end
             
             if ~isempty(validFlips)
                 opAverages.avgFlips = mean(validFlips);
+            else
+                % If no valid flips but we have multi-procedure days, set avgFlips to 0
+                opAverages.avgFlips = 0;
+            end
+            
+            if ~isempty(validCases)
+                opAverages.avgCasesPerMultiProcDay = mean(validCases);
+                
+                % Calculate flip to turnover ratio
+                % Number of turnovers = number of cases - 1 (for each multi-procedure day)
+                avgTurnovers = opAverages.avgCasesPerMultiProcDay - 1;
+                if avgTurnovers > 0
+                    if ~isempty(validFlips)
+                        opAverages.flipToTurnoverRatio = mean(validFlips) / avgTurnovers;
+                    else
+                        % If no valid flips but valid cases, ratio is 0
+                        opAverages.flipToTurnoverRatio = 0;
+                    end
+                end
             end
         end
         
@@ -717,12 +753,17 @@ function displayOperatorAnalysis(operatorCaseStats, operatorWorkTimeStats, analy
         totalCases = sum(caseArray);
         activeDays = sum(caseArray > 0);
         avgCasesPerActiveDay = totalCases / max(activeDays, 1);
+        stdCasesPerActiveDay = std(caseArray(caseArray > 0));
+        medianCasesPerActiveDay = median(caseArray(caseArray > 0));
         
         validWorkTimes = workTimeArray(~isnan(workTimeArray));
         avgWorkTimePerActiveDay = mean(validWorkTimes);
+        stdWorkTimePerActiveDay = std(validWorkTimes);
+        medianWorkTimePerActiveDay = median(validWorkTimes);
         
-        fprintf('  %s: %d cases over %d active days (avg %.1f cases/day, %.1f min work/day)\n', ...
-            opName, totalCases, activeDays, avgCasesPerActiveDay, avgWorkTimePerActiveDay);
+        fprintf('  %s: %d cases over %d active days (avg %.1f±%.1f, median %.1f cases/day; avg %.1f±%.1f, median %.1f min work/day)\n', ...
+            opName, totalCases, activeDays, avgCasesPerActiveDay, stdCasesPerActiveDay, medianCasesPerActiveDay, ...
+            avgWorkTimePerActiveDay, stdWorkTimePerActiveDay, medianWorkTimePerActiveDay);
     end
 end
 
@@ -1681,8 +1722,8 @@ function displayOperatorIdleTimeAndFlipAnalysis(operatorIdleStats, operatorFlipS
             
             if ~isempty(idleTimes) && any(idleTimes > 0)
                 validIdleTimes = idleTimes(idleTimes > 0);
-                fprintf('  %s: Avg idle time %.1f min (range: %.1f-%.1f min, %d days)\n', ...
-                    opName, mean(validIdleTimes), min(validIdleTimes), max(validIdleTimes), length(validIdleTimes));
+                fprintf('  %s: Avg idle time %.1f±%.1f, median %.1f min (range: %.1f-%.1f min, %d days)\n', ...
+                    opName, mean(validIdleTimes), std(validIdleTimes), median(validIdleTimes), min(validIdleTimes), max(validIdleTimes), length(validIdleTimes));
             end
         end
     end
@@ -1698,8 +1739,8 @@ function displayOperatorIdleTimeAndFlipAnalysis(operatorIdleStats, operatorFlipS
             
             if ~isempty(flipCounts) && any(flipCounts > 0)
                 validFlips = flipCounts(flipCounts > 0);
-                fprintf('  %s: Avg %.1f lab flips/day (range: %d-%d flips, %d days with flips)\n', ...
-                    opName, mean(validFlips), min(validFlips), max(validFlips), length(validFlips));
+                fprintf('  %s: Avg %.1f±%.1f, median %.1f lab flips/day (range: %d-%d flips, %d days with flips)\n', ...
+                    opName, mean(validFlips), std(validFlips), median(validFlips), min(validFlips), max(validFlips), length(validFlips));
             end
         end
     end
@@ -1708,7 +1749,7 @@ function displayOperatorIdleTimeAndFlipAnalysis(operatorIdleStats, operatorFlipS
     if ~isempty(dailyLabFlips)
         fprintf('\nDaily lab flip summary:\n');
         fprintf('  Total lab flips across all days: %d\n', sum(dailyLabFlips));
-        fprintf('  Average lab flips per day: %.1f\n', mean(dailyLabFlips));
+        fprintf('  Average lab flips per day: %.1f±%.1f, median %.1f\n', mean(dailyLabFlips), std(dailyLabFlips), median(dailyLabFlips));
         fprintf('  Range: %d-%d flips per day\n', min(dailyLabFlips), max(dailyLabFlips));
         fprintf('  Days with lab flips: %d of %d (%.1f%%)\n', ...
             sum(dailyLabFlips > 0), length(dailyLabFlips), (sum(dailyLabFlips > 0)/length(dailyLabFlips))*100);

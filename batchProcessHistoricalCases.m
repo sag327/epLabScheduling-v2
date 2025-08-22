@@ -20,7 +20,8 @@ function batchResults = batchProcessHistoricalCases(varargin)
 % Outputs:
 %   batchResults - Structure containing:
 %     .dailyResults - Cell array of daily scheduling results
-%     .dailySchedules - Cell array of daily schedules
+%     .dailySchedules - containers.Map formatted for analyzeHistoricalData.m compatibility
+%     .caseData - Historical data structure compatible with analyzeHistoricalData.m
 %     .processedDates - Cell array of processed dates
 %     .summaryStats - Summary statistics across all days
 %     .parameters - Processing parameters used
@@ -33,6 +34,11 @@ function batchResults = batchProcessHistoricalCases(varargin)
 %   % Process specific dataset
 %   load('myData.mat');
 %   results = batchProcessHistoricalCases('DataSource', 'variable', 'Data', myData);
+%
+%   % Use results with analyzeHistoricalData for comprehensive analysis
+%   batchResults = batchProcessHistoricalCases();
+%   analysisResults = analyzeHistoricalData(batchResults.caseData, ...
+%                                          'HistoricalSchedules', batchResults.dailySchedules);
 
 % Parse input parameters
 p = inputParser;
@@ -436,7 +442,13 @@ summaryStats = calculateSummaryStats(dailyResults, dailySchedules);
 % Create final results structure
 batchResults = struct();
 batchResults.dailyResults = dailyResults;
-batchResults.dailySchedules = dailySchedules;
+
+% Format dailySchedules to match analyzeHistoricalData.m expected format
+batchResults.dailySchedules = formatSchedulesForAnalysis(dailySchedules, dailyResults, processedDates);
+
+% Create caseData structure compatible with analyzeHistoricalData.m
+batchResults.caseData = createCaseDataStructure(userData);
+
 batchResults.processedDates = processedDates;
 batchResults.processingErrors = processingErrors(~cellfun(@isempty, processingErrors));
 batchResults.summaryStats = summaryStats;
@@ -907,4 +919,163 @@ function result = ensureNumeric(input, defaultValue)
     else
         result = defaultValue;
     end
+end
+
+%% Helper function to format schedules for analyzeHistoricalData.m
+function formattedSchedules = formatSchedulesForAnalysis(dailySchedules, dailyResults, processedDates)
+% Format dailySchedules to match the expected format of historicalSchedules from loadHistoricalDataFromFile.m
+% Expected format: containers.Map with dateStr as key and struct with fields:
+%   .schedule, .results, .date, .numCases
+
+formattedSchedules = containers.Map();
+
+for i = 1:length(processedDates)
+    if ~isempty(processedDates{i}) && ~isempty(dailySchedules{i}) && ~isempty(dailyResults{i})
+        dateStr = processedDates{i};
+        
+        % Create schedule data structure matching loadHistoricalDataFromFile format
+        scheduleData = struct();
+        scheduleData.schedule = dailySchedules{i};
+        scheduleData.results = dailyResults{i};
+        scheduleData.date = dateStr;
+        scheduleData.numCases = dailyResults{i}.numCases;
+        
+        % Add lab mapping information if available
+        if isfield(dailySchedules{i}, 'labMapping')
+            scheduleData.labMapping = dailySchedules{i}.labMapping;
+        end
+        if isfield(dailySchedules{i}, 'numLabs')
+            scheduleData.numLabs = dailySchedules{i}.numLabs;
+        end
+        
+        formattedSchedules(dateStr) = scheduleData;
+    end
+end
+
+fprintf('Formatted %d daily schedules for analysis compatibility\n', formattedSchedules.Count);
+end
+
+%% Helper function to create caseData structure compatible with analyzeHistoricalData.m
+function caseData = createCaseDataStructure(userData)
+% Create a caseData structure that matches the format expected by analyzeHistoricalData.m
+% Expected format: struct with fields matching historicalData from loadHistoricalDataFromFile.m
+
+if isempty(userData)
+    caseData = struct();
+    return;
+end
+
+numCases = length(userData);
+fprintf('Creating caseData structure from %d cases...\n', numCases);
+
+% Initialize the case data structure with required fields
+caseData = struct();
+
+% Core identification fields
+caseData.caseID = cell(numCases, 1);
+caseData.date = cell(numCases, 1);
+caseData.surgeon = cell(numCases, 1);
+
+% Procedure information
+caseData.procedure = cell(numCases, 1);
+caseData.service = cell(numCases, 1);
+caseData.location = cell(numCases, 1);
+
+% Timing information (in minutes)
+caseData.setupTime = zeros(numCases, 1);
+caseData.procedureTime = zeros(numCases, 1);
+caseData.postTime = zeros(numCases, 1);
+caseData.totalRoomTime = zeros(numCases, 1);
+
+% Additional optional fields
+caseData.admissionStatus = cell(numCases, 1);
+caseData.room = cell(numCases, 1);
+
+% Populate the structure from userData
+for i = 1:numCases
+    case_data = userData(i);
+    
+    % Core fields
+    caseData.caseID{i} = ensureChar(case_data.caseID);
+    
+    % Handle date field - convert to string if datetime
+    if isfield(case_data, 'procedureDate')
+        if isdatetime(case_data.procedureDate)
+            caseData.date{i} = char(case_data.procedureDate, 'dd-MMM-yyyy');
+        else
+            caseData.date{i} = ensureChar(case_data.procedureDate);
+        end
+    else
+        caseData.date{i} = '';
+    end
+    
+    caseData.surgeon{i} = ensureChar(case_data.operatorName);
+    
+    % Procedure information with defaults
+    if isfield(case_data, 'procedure')
+        caseData.procedure{i} = ensureChar(case_data.procedure);
+    else
+        caseData.procedure{i} = 'Unknown';
+    end
+    
+    if isfield(case_data, 'service')
+        caseData.service{i} = ensureChar(case_data.service);
+    else
+        caseData.service{i} = 'EP';
+    end
+    
+    if isfield(case_data, 'location')
+        caseData.location{i} = ensureChar(case_data.location);
+    else
+        caseData.location{i} = 'EP Lab';
+    end
+    
+    % Timing information
+    caseData.setupTime(i) = ensureNumeric(getFieldSafe(case_data, 'setupTime'), 30);
+    caseData.procedureTime(i) = ensureNumeric(case_data.procedureDuration, 120);
+    caseData.postTime(i) = ensureNumeric(getFieldSafe(case_data, 'postTime'), 15);
+    
+    % Calculate total room time
+    if isfield(case_data, 'totalRoomTime')
+        caseData.totalRoomTime(i) = ensureNumeric(case_data.totalRoomTime, 
+            caseData.setupTime(i) + caseData.procedureTime(i) + caseData.postTime(i));
+    else
+        caseData.totalRoomTime(i) = caseData.setupTime(i) + caseData.procedureTime(i) + caseData.postTime(i);
+    end
+    
+    % Optional fields
+    if isfield(case_data, 'admissionStatus')
+        caseData.admissionStatus{i} = ensureChar(case_data.admissionStatus);
+    else
+        caseData.admissionStatus{i} = '';
+    end
+    
+    if isfield(case_data, 'room')
+        caseData.room{i} = ensureChar(case_data.room);
+    else
+        caseData.room{i} = '';
+    end
+end
+
+fprintf('Created caseData structure with %d cases\n', numCases);
+
+% Show basic statistics
+uniqueDates = unique(caseData.date);
+uniqueSurgeons = unique(caseData.surgeon);
+uniqueProcedures = unique(caseData.procedure);
+
+fprintf('caseData Summary:\n');
+fprintf('  Unique dates: %d\n', length(uniqueDates(~strcmp(uniqueDates, ''))));
+fprintf('  Unique surgeons: %d\n', length(uniqueSurgeons(~strcmp(uniqueSurgeons, ''))));
+fprintf('  Unique procedures: %d\n', length(uniqueProcedures(~strcmp(uniqueProcedures, ''))));
+
+end
+
+%% Helper function to safely get field value
+function value = getFieldSafe(structure, fieldName)
+if isfield(structure, fieldName)
+    value = structure.(fieldName);
+else
+    value = NaN;
+end
 end
