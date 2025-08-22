@@ -19,6 +19,7 @@ function [schedule, results] = scheduleHistoricalCases(cases, varargin)
 %   'maxOperatorTime' - Maximum time per operator in minutes (default: 480, 8 hours)
 %   'turnoverTime' - Room turnover time between cases in minutes (default: 15)
 %   'enforceMiddnight' - Ensure all cases complete before midnight (default: true)
+%   'prioritizeOutpatient' - Schedule outpatient cases first, then remaining cases (default: false)
 %   'verbose' - Display detailed output (default: true)
 %
 % Outputs:
@@ -35,6 +36,7 @@ addParameter(p, 'caseFilter', 'all', @(x) ismember(x, {'all', 'outpatient', 'inp
 addParameter(p, 'maxOperatorTime', 480, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'turnoverTime', 15, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'enforceMiddnight', true, @islogical);
+addParameter(p, 'prioritizeOutpatient', false, @islogical);
 addParameter(p, 'verbose', true, @islogical);
 
 parse(p, cases, varargin{:});
@@ -46,6 +48,7 @@ caseFilter = p.Results.caseFilter;
 maxOperatorTime = p.Results.maxOperatorTime;
 turnoverTime = p.Results.turnoverTime;
 enforceMiddnight = p.Results.enforceMiddnight;
+prioritizeOutpatient = p.Results.prioritizeOutpatient;
 verbose = p.Results.verbose;
 
 if verbose
@@ -71,6 +74,78 @@ if ~strcmp(caseFilter, 'all')
     end
     if verbose
         fprintf('Filtered to %d %s cases\n', length(cases), caseFilter);
+    end
+end
+
+% Handle two-phase scheduling: outpatient first, then remaining cases
+if prioritizeOutpatient && ~strcmp(caseFilter, 'inpatient')
+    if verbose
+        fprintf('Two-phase scheduling: Outpatient cases first\n');
+    end
+    
+    % Phase 1: Schedule outpatient cases only
+    outpatientCases = cases(strcmp({cases.admissionStatus}, 'Hospital Outpatient Surgery (Amb Proc)') | cellfun(@isempty, {cases.admissionStatus}));
+    
+    if ~isempty(outpatientCases)
+        if verbose
+            fprintf('Phase 1: Scheduling %d outpatient cases\n', length(outpatientCases));
+        end
+        
+        % Recursively call with outpatient filter and prioritizeOutpatient disabled
+        [phase1Schedule, phase1Results] = scheduleHistoricalCases(outpatientCases, ...
+            'numLabs', numLabs, ...
+            'labStartTimes', labStartTimes, ...
+            'optimizationMetric', optimizationMetric, ...
+            'caseFilter', 'all', ...
+            'maxOperatorTime', maxOperatorTime, ...
+            'turnoverTime', turnoverTime, ...
+            'enforceMiddnight', enforceMiddnight, ...
+            'prioritizeOutpatient', false, ...
+            'verbose', false);
+        
+        % Phase 2: Schedule remaining cases (inpatient)
+        inpatientCases = cases(strcmp({cases.admissionStatus}, 'Inpatient'));
+        
+        if ~isempty(inpatientCases)
+            if verbose
+                fprintf('Phase 2: Scheduling %d inpatient cases with outpatient constraints\n', length(inpatientCases));
+            end
+            
+            % Update lab start times based on outpatient schedule completion
+            updatedLabStartTimes = calculateUpdatedLabTimes(phase1Schedule, labStartTimes);
+            
+            % Recursively call with inpatient cases and updated start times
+            [phase2Schedule, phase2Results] = scheduleHistoricalCases(inpatientCases, ...
+                'numLabs', numLabs, ...
+                'labStartTimes', updatedLabStartTimes, ...
+                'optimizationMetric', optimizationMetric, ...
+                'caseFilter', 'all', ...
+                'maxOperatorTime', maxOperatorTime, ...
+                'turnoverTime', turnoverTime, ...
+                'enforceMiddnight', enforceMiddnight, ...
+                'prioritizeOutpatient', false, ...
+                'verbose', false);
+            
+            % Combine schedules
+            [schedule, results] = combineSchedules(phase1Schedule, phase1Results, phase2Schedule, phase2Results, verbose);
+        else
+            % Only outpatient cases
+            schedule = phase1Schedule;
+            results = phase1Results;
+            results.isPhasedSchedule = true;
+            results.phase1Cases = length(outpatientCases);
+            results.phase2Cases = 0;
+        end
+    else
+        % No outpatient cases, proceed with normal scheduling
+        if verbose
+            fprintf('No outpatient cases found, proceeding with normal scheduling\n');
+        end
+    end
+    
+    % Return early if we did two-phase scheduling
+    if exist('schedule', 'var')
+        return;
     end
 end
 
@@ -1095,4 +1170,138 @@ if isfield(results, 'objectiveValue') && ~isnan(results.objectiveValue)
     fprintf('Objective value: %.4f\n', results.objectiveValue);
 end
 
+end
+
+%% Helper functions for two-phase scheduling
+
+function updatedLabStartTimes = calculateUpdatedLabTimes(phase1Schedule, originalLabStartTimes)
+% Calculate updated lab start times based on when phase 1 (outpatient) schedule ends
+% This ensures phase 2 (inpatient) cases start after outpatient cases are complete
+
+updatedLabStartTimes = originalLabStartTimes;
+
+for labIdx = 1:length(phase1Schedule.labs)
+    labSchedule = phase1Schedule.labs{labIdx};
+    
+    if ~isempty(labSchedule)
+        % Find the latest end time for this lab in phase 1
+        latestEndTime = 0;
+        for caseIdx = 1:length(labSchedule)
+            caseEndTime = labSchedule(caseIdx).endTime;
+            if caseEndTime > latestEndTime
+                latestEndTime = caseEndTime;
+            end
+        end
+        
+        % Convert to time string format (HH:MM)
+        hours = floor(latestEndTime / 60);
+        minutes = mod(latestEndTime, 60);
+        
+        % Ensure we don't go past midnight
+        if hours >= 24
+            hours = 23;
+            minutes = 59;
+        end
+        
+        updatedLabStartTimes{labIdx} = sprintf('%02d:%02d', hours, minutes);
+    end
+end
+
+fprintf('Updated lab start times for phase 2: %s\n', strjoin(updatedLabStartTimes, ', '));
+end
+
+function [combinedSchedule, combinedResults] = combineSchedules(phase1Schedule, phase1Results, phase2Schedule, phase2Results, verbose)
+% Combine two schedules into a single schedule structure
+
+if verbose
+    fprintf('Combining phase 1 and phase 2 schedules\n');
+end
+
+% Initialize combined schedule
+combinedSchedule = phase1Schedule;
+
+% Combine lab schedules
+for labIdx = 1:length(phase1Schedule.labs)
+    % Start with phase 1 schedule
+    labSchedule = phase1Schedule.labs{labIdx};
+    
+    % Add phase 2 cases if any
+    if labIdx <= length(phase2Schedule.labs) && ~isempty(phase2Schedule.labs{labIdx})
+        labSchedule = [labSchedule, phase2Schedule.labs{labIdx}];
+    end
+    
+    combinedSchedule.labs{labIdx} = labSchedule;
+end
+
+% Combine operator schedules
+operatorKeys1 = keys(phase1Schedule.operators);
+operatorKeys2 = keys(phase2Schedule.operators);
+allOperatorKeys = unique([operatorKeys1, operatorKeys2]);
+
+combinedSchedule.operators = containers.Map();
+for i = 1:length(allOperatorKeys)
+    opKey = allOperatorKeys{i};
+    opSchedule = [];
+    
+    % Add phase 1 cases for this operator
+    if isKey(phase1Schedule.operators, opKey)
+        opSchedule = [opSchedule, phase1Schedule.operators(opKey)];
+    end
+    
+    % Add phase 2 cases for this operator
+    if isKey(phase2Schedule.operators, opKey)
+        opSchedule = [opSchedule, phase2Schedule.operators(opKey)];
+    end
+    
+    if ~isempty(opSchedule)
+        combinedSchedule.operators(opKey) = opSchedule;
+    end
+end
+
+% Combine results
+combinedResults = phase1Results;
+
+% Update metrics to reflect combined schedule
+combinedResults.isPhasedSchedule = true;
+combinedResults.phase1Cases = length(getScheduledCases(phase1Schedule));
+combinedResults.phase2Cases = length(getScheduledCases(phase2Schedule));
+
+% Update time metrics
+combinedResults.scheduleStart = min(phase1Results.scheduleStart, phase2Results.scheduleStart);
+combinedResults.scheduleEnd = max(phase1Results.scheduleEnd, phase2Results.scheduleEnd);
+combinedResults.makespan = combinedResults.scheduleEnd - combinedResults.scheduleStart;
+
+% Combine idle times and overtime
+combinedResults.totalLabIdleTime = phase1Results.totalLabIdleTime + phase2Results.totalLabIdleTime;
+combinedResults.totalOperatorIdleTime = phase1Results.totalOperatorIdleTime + phase2Results.totalOperatorIdleTime;
+combinedResults.totalOperatorOvertime = phase1Results.totalOperatorOvertime + phase2Results.totalOperatorOvertime;
+
+% Update utilization metrics (weighted average)
+totalCases1 = combinedResults.phase1Cases;
+totalCases2 = combinedResults.phase2Cases;
+totalCases = totalCases1 + totalCases2;
+
+if totalCases > 0
+    combinedResults.meanLabUtilization = (phase1Results.meanLabUtilization * totalCases1 + ...
+                                         phase2Results.meanLabUtilization * totalCases2) / totalCases;
+    combinedResults.meanOperatorIdleTime = (phase1Results.meanOperatorIdleTime * totalCases1 + ...
+                                           phase2Results.meanOperatorIdleTime * totalCases2) / totalCases;
+end
+
+% Combine objective values
+combinedResults.objectiveValue = phase1Results.objectiveValue + phase2Results.objectiveValue;
+
+if verbose
+    fprintf('Combined schedule: %d total cases (%d outpatient + %d inpatient)\n', ...
+            totalCases, totalCases1, totalCases2);
+    fprintf('Combined makespan: %.1f hours\n', combinedResults.makespan/60);
+end
+end
+
+function numCases = getScheduledCases(schedule)
+% Count the total number of scheduled cases across all labs
+numCases = 0;
+for labIdx = 1:length(schedule.labs)
+    numCases = numCases + length(schedule.labs{labIdx});
+end
 end
