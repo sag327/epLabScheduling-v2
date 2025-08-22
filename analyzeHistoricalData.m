@@ -34,14 +34,19 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %
 % Output:
 %   analysisResults - Structure containing comprehensive analysis results:
-%     .datasetSummary     - Basic dataset statistics
-%     .procedureAnalysis  - Procedure type and duration statistics
-%     .surgeonAnalysis    - Surgeon workload and performance metrics
-%     .timeAnalysis       - Time duration and scheduling patterns
-%     .roomAnalysis       - Room utilization statistics
-%     .scheduleAnalysis   - Schedule performance metrics (if schedules provided)
-%     .operatorAnalysis   - Operator workload and idle time (if schedules provided)
-%     .labFlipAnalysis    - Lab switching and flip statistics (if schedules provided)
+%     .datasetSummary         - Basic dataset statistics
+%     .procedureAnalysis      - Procedure type and duration statistics
+%     .surgeonAnalysis        - Surgeon workload and performance metrics
+%     .timeAnalysis           - Time duration and scheduling patterns
+%     .roomAnalysis           - Room utilization statistics
+%     .operatorMetrics        - Comprehensive operator-level metrics (setup, procedure, post times)
+%     .operatorPlottingData   - Arrays organized by operator for easy plotting and visualization
+%     .procedureTimeAnalysis  - Global procedure time statistics (mean, median, P25, P75, P90)
+%     .procedureTimeByOperator - Procedure time statistics broken down by operator
+%     .procedurePlottingData  - Arrays organized by procedure for easy plotting (global & by operator)
+%     .scheduleAnalysis       - Schedule performance metrics (if schedules provided)
+%     .operatorAnalysis       - Operator workload and idle time (if schedules provided)
+%     .labFlipAnalysis        - Lab switching and flip statistics (if schedules provided)
 %
 %   Also displays analysis summary if ShowStats is true
 %
@@ -87,6 +92,25 @@ analysisResults = struct();
 [analysisResults.datasetSummary, analysisResults.procedureAnalysis, ...
  analysisResults.surgeonAnalysis, analysisResults.timeAnalysis, ...
  analysisResults.roomAnalysis] = performDetailedAnalysis(historicalData, showStats);
+
+% Perform comprehensive operator metrics analysis
+operatorMetrics = performOperatorMetricsAnalysis(historicalData, showStats);
+
+% Store operator metrics in analysis results
+analysisResults.operatorMetrics = operatorMetrics;
+
+% Create plotting-ready data structure for easy visualization
+analysisResults.operatorPlottingData = createOperatorPlottingData(operatorMetrics);
+
+% Perform comprehensive procedure-specific analysis
+[procedureAnalysisGlobal, procedureAnalysisByOperator] = performProcedureTimeAnalysis(historicalData, showStats);
+
+% Store procedure analysis results
+analysisResults.procedureTimeAnalysis = procedureAnalysisGlobal;
+analysisResults.procedureTimeByOperator = procedureAnalysisByOperator;
+
+% Create procedure plotting data for easy visualization
+analysisResults.procedurePlottingData = createProcedurePlottingData(procedureAnalysisGlobal, procedureAnalysisByOperator);
 
 % Perform schedule analysis if historical schedules are provided
 if ~isempty(historicalSchedules)
@@ -530,8 +554,6 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     % Display operator idle time and lab flip analysis
     displayOperatorIdleTimeAndFlipAnalysis(operatorIdleStats, operatorFlipStats, dailyLabFlips, showStats);
     
-    % Perform procedure duration analysis by operator
-    performProcedureDurationAnalysis(historicalData);
     
     % Populate structured return values
     scheduleAnalysis.avgMakespan = mean(allMakespans);
@@ -729,69 +751,183 @@ function displayRoomAnalysis(roomStats)
     end
 end
 
-function performProcedureDurationAnalysis(historicalData)
-    fprintf('\n--- Procedure Duration Analysis by Operator ---\n');
+function operatorMetrics = performOperatorMetricsAnalysis(historicalData, showStats)
+    if showStats
+        fprintf('\n=== COMPREHENSIVE OPERATOR METRICS ANALYSIS ===\n');
+    end
     
-    % Get unique procedures and operators
-    uniqueProcedures = unique(historicalData.procedure);
+    % Get unique operators
     uniqueOperators = unique(historicalData.surgeon);
+    uniqueOperators = uniqueOperators(~ismissing(uniqueOperators) & ~strcmp(uniqueOperators, ''));
     
-    fprintf('\nProcedure duration statistics:\n');
+    % Initialize operator metrics structure
+    operatorMetrics = struct();
     
-    % Overall procedure statistics
-    for i = 1:min(10, length(uniqueProcedures))
-        procedure = uniqueProcedures{i};
-        procedureIndices = strcmp(historicalData.procedure, procedure);
-        procedureTimes = historicalData.procedureTime(procedureIndices);
-        validTimes = procedureTimes(~isnan(procedureTimes) & procedureTimes > 0);
-        
-        if ~isempty(validTimes)
-            p50 = prctile(validTimes, 50);
-            p75 = prctile(validTimes, 75);
-            p90 = prctile(validTimes, 90);
-            
-            fprintf('  %s (%d cases): P50=%.1f, P75=%.1f, P90=%.1f min\n', ...
-                procedure, length(validTimes), p50, p75, p90);
-        end
-    end
-    
-    % Operator-specific procedure analysis for top operators
-    fprintf('\n--- Operator-Specific Procedure Analysis ---\n');
-    
-    % Get top 5 operators by case count
-    operatorCounts = zeros(length(uniqueOperators), 1);
-    for i = 1:length(uniqueOperators)
-        operatorCounts(i) = sum(strcmp(historicalData.surgeon, uniqueOperators{i}));
-    end
-    [~, sortIdx] = sort(operatorCounts, 'descend');
-    topOperators = uniqueOperators(sortIdx(1:min(5, length(sortIdx))));
-    
-    for opIdx = 1:length(topOperators)
-        operator = topOperators{opIdx};
+    for opIdx = 1:length(uniqueOperators)
+        operator = uniqueOperators{opIdx};
         operatorIndices = strcmp(historicalData.surgeon, operator);
         
-        fprintf('\n%s:\n', operator);
+        % Initialize metrics for this operator
+        opMetrics = struct();
+        opMetrics.operatorName = operator;
+        opMetrics.totalCases = sum(operatorIndices);
         
-        % Get procedures for this operator
-        operatorProcedures = unique(historicalData.procedure(operatorIndices));
+        % Extract all time metrics for this operator
+        opSetupTimes = historicalData.setupTime(operatorIndices);
+        opProcTimes = historicalData.procedureTime(operatorIndices);
+        opPostTimes = historicalData.postTime(operatorIndices);
         
-        for procIdx = 1:min(5, length(operatorProcedures))
-            procedure = operatorProcedures{procIdx};
+        % Remove invalid/missing values
+        validSetup = opSetupTimes(~isnan(opSetupTimes) & opSetupTimes > 0);
+        validProc = opProcTimes(~isnan(opProcTimes) & opProcTimes > 0);
+        validPost = opPostTimes(~isnan(opPostTimes) & opPostTimes > 0);
+        
+        % Setup time metrics
+        if ~isempty(validSetup)
+            opMetrics.setupTime = struct(...
+                'mean', mean(validSetup), ...
+                'median', median(validSetup), ...
+                'std', std(validSetup), ...
+                'min', min(validSetup), ...
+                'max', max(validSetup), ...
+                'p25', prctile(validSetup, 25), ...
+                'p75', prctile(validSetup, 75), ...
+                'p90', prctile(validSetup, 90), ...
+                'validCount', length(validSetup), ...
+                'allValues', validSetup);
+        else
+            opMetrics.setupTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Procedure time metrics
+        if ~isempty(validProc)
+            opMetrics.procedureTime = struct(...
+                'mean', mean(validProc), ...
+                'median', median(validProc), ...
+                'std', std(validProc), ...
+                'min', min(validProc), ...
+                'max', max(validProc), ...
+                'p25', prctile(validProc, 25), ...
+                'p75', prctile(validProc, 75), ...
+                'p90', prctile(validProc, 90), ...
+                'validCount', length(validProc), ...
+                'allValues', validProc);
+        else
+            opMetrics.procedureTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Post-procedure time metrics
+        if ~isempty(validPost)
+            opMetrics.postTime = struct(...
+                'mean', mean(validPost), ...
+                'median', median(validPost), ...
+                'std', std(validPost), ...
+                'min', min(validPost), ...
+                'max', max(validPost), ...
+                'p25', prctile(validPost, 25), ...
+                'p75', prctile(validPost, 75), ...
+                'p90', prctile(validPost, 90), ...
+                'validCount', length(validPost), ...
+                'allValues', validPost);
+        else
+            opMetrics.postTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Total case time (sum of setup + procedure + post)
+        totalCaseTimes = [];
+        for caseIdx = 1:length(opSetupTimes)
+            setupT = opSetupTimes(caseIdx);
+            procT = opProcTimes(caseIdx);
+            postT = opPostTimes(caseIdx);
             
-            % Get times for this operator and procedure combination
-            combinedIndices = operatorIndices & strcmp(historicalData.procedure, procedure);
-            procedureTimes = historicalData.procedureTime(combinedIndices);
-            validTimes = procedureTimes(~isnan(procedureTimes) & procedureTimes > 0);
-            
-            if length(validTimes) >= 3  % Need at least 3 cases for meaningful percentiles
-                p50 = prctile(validTimes, 50);
-                p75 = prctile(validTimes, 75);
-                p90 = prctile(validTimes, 90);
-                
-                fprintf('  %s (%d cases): P50=%.1f, P75=%.1f, P90=%.1f min\n', ...
-                    procedure, length(validTimes), p50, p75, p90);
+            % Only include if all three components are valid
+            if ~isnan(setupT) && ~isnan(procT) && ~isnan(postT) && setupT > 0 && procT > 0 && postT > 0
+                totalCaseTimes = [totalCaseTimes, setupT + procT + postT];
             end
         end
+        
+        if ~isempty(totalCaseTimes)
+            opMetrics.totalCaseTime = struct(...
+                'mean', mean(totalCaseTimes), ...
+                'median', median(totalCaseTimes), ...
+                'std', std(totalCaseTimes), ...
+                'min', min(totalCaseTimes), ...
+                'max', max(totalCaseTimes), ...
+                'p25', prctile(totalCaseTimes, 25), ...
+                'p75', prctile(totalCaseTimes, 75), ...
+                'p90', prctile(totalCaseTimes, 90), ...
+                'validCount', length(totalCaseTimes), ...
+                'allValues', totalCaseTimes);
+        else
+            opMetrics.totalCaseTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Procedure type analysis for this operator
+        opProcedures = historicalData.procedure(operatorIndices);
+        opProcedures = opProcedures(~ismissing(opProcedures) & ~strcmp(opProcedures, ''));
+        [uniqueProcs, ~, procIdx] = unique(opProcedures);
+        procCounts = accumarray(procIdx, 1);
+        [procCounts, sortIdx] = sort(procCounts, 'descend');
+        uniqueProcs = uniqueProcs(sortIdx);
+        
+        opMetrics.procedureTypes = struct(...
+            'procedures', {uniqueProcs}, ...
+            'counts', procCounts, ...
+            'percentages', (procCounts / length(opProcedures)) * 100);
+        
+        % Service/location analysis
+        if isfield(historicalData, 'service')
+            opServices = historicalData.service(operatorIndices);
+            opServices = opServices(~ismissing(opServices) & ~strcmp(opServices, ''));
+            if ~isempty(opServices)
+                [uniqueServices, ~, serviceIdx] = unique(opServices);
+                serviceCounts = accumarray(serviceIdx, 1);
+                opMetrics.services = struct(...
+                    'services', {uniqueServices}, ...
+                    'counts', serviceCounts);
+            else
+                opMetrics.services = struct('services', {{}}, 'counts', []);
+            end
+        end
+        
+        % Room analysis
+        if isfield(historicalData, 'room')
+            opRooms = historicalData.room(operatorIndices);
+            opRooms = opRooms(~ismissing(opRooms) & ~strcmp(opRooms, ''));
+            if ~isempty(opRooms)
+                [uniqueRooms, ~, roomIdx] = unique(opRooms);
+                roomCounts = accumarray(roomIdx, 1);
+                opMetrics.rooms = struct(...
+                    'rooms', {uniqueRooms}, ...
+                    'counts', roomCounts);
+            else
+                opMetrics.rooms = struct('rooms', {{}}, 'counts', []);
+            end
+        end
+        
+        % Calculate efficiency metrics
+        if opMetrics.setupTime.validCount > 0 && opMetrics.procedureTime.validCount > 0
+            setupToProcRatio = opMetrics.setupTime.mean / opMetrics.procedureTime.mean;
+            if opMetrics.postTime.validCount > 0
+                postToProcRatio = opMetrics.postTime.mean / opMetrics.procedureTime.mean;
+            else
+                postToProcRatio = NaN;
+            end
+            opMetrics.efficiency = struct(...
+                'setupToProcRatio', setupToProcRatio, ...
+                'postToProcRatio', postToProcRatio);
+        else
+            opMetrics.efficiency = struct('setupToProcRatio', NaN, 'postToProcRatio', NaN);
+        end
+        
+        % Store in main structure using valid field name
+        fieldName = matlab.lang.makeValidName(operator);
+        operatorMetrics.(fieldName) = opMetrics;
+    end
+    
+    % Display summary if requested
+    if showStats
+        displayOperatorMetricsSummary(operatorMetrics);
     end
 end
 
@@ -811,6 +947,719 @@ fprintf('Generated on: %s\n\n', datestr(now));
 performDetailedAnalysis(historicalData);
 
 diary off;
+end
+
+function displayOperatorMetricsSummary(operatorMetrics)
+    fprintf('\n--- Comprehensive Operator Metrics Summary ---\n');
+    
+    operatorNames = fieldnames(operatorMetrics);
+    if isempty(operatorNames)
+        fprintf('No operator metrics available\n');
+        return;
+    end
+    
+    % Sort operators by total case count
+    totalCases = zeros(length(operatorNames), 1);
+    for i = 1:length(operatorNames)
+        totalCases(i) = operatorMetrics.(operatorNames{i}).totalCases;
+    end
+    [~, sortIdx] = sort(totalCases, 'descend');
+    
+    fprintf('\nTop operators by case volume:\n');
+    for i = 1:min(10, length(sortIdx))
+        idx = sortIdx(i);
+        opName = operatorNames{idx};
+        opData = operatorMetrics.(opName);
+        
+        fprintf('\n%s (%d total cases):\n', opData.operatorName, opData.totalCases);
+        
+        % Setup time
+        if opData.setupTime.validCount > 0
+            fprintf('  Setup time: Mean=%.1f±%.1f min, Median=%.1f min (P25=%.1f, P75=%.1f, P90=%.1f)\n', ...
+                opData.setupTime.mean, opData.setupTime.std, opData.setupTime.median, ...
+                opData.setupTime.p25, opData.setupTime.p75, opData.setupTime.p90);
+        else
+            fprintf('  Setup time: No valid data\n');
+        end
+        
+        % Procedure time
+        if opData.procedureTime.validCount > 0
+            fprintf('  Procedure time: Mean=%.1f±%.1f min, Median=%.1f min (P25=%.1f, P75=%.1f, P90=%.1f)\n', ...
+                opData.procedureTime.mean, opData.procedureTime.std, opData.procedureTime.median, ...
+                opData.procedureTime.p25, opData.procedureTime.p75, opData.procedureTime.p90);
+        else
+            fprintf('  Procedure time: No valid data\n');
+        end
+        
+        % Post time
+        if opData.postTime.validCount > 0
+            fprintf('  Post time: Mean=%.1f±%.1f min, Median=%.1f min (P25=%.1f, P75=%.1f, P90=%.1f)\n', ...
+                opData.postTime.mean, opData.postTime.std, opData.postTime.median, ...
+                opData.postTime.p25, opData.postTime.p75, opData.postTime.p90);
+        else
+            fprintf('  Post time: No valid data\n');
+        end
+        
+        % Total case time
+        if opData.totalCaseTime.validCount > 0
+            fprintf('  Total case time: Mean=%.1f±%.1f min, Median=%.1f min\n', ...
+                opData.totalCaseTime.mean, opData.totalCaseTime.std, opData.totalCaseTime.median);
+        else
+            fprintf('  Total case time: No valid data\n');
+        end
+        
+        % Top procedures
+        if ~isempty(opData.procedureTypes.procedures)
+            fprintf('  Top procedures: ');
+            for j = 1:min(3, length(opData.procedureTypes.procedures))
+                fprintf('%s (%d cases)', opData.procedureTypes.procedures{j}, opData.procedureTypes.counts(j));
+                if j < min(3, length(opData.procedureTypes.procedures))
+                    fprintf(', ');
+                end
+            end
+            fprintf('\n');
+        end
+        
+        % Efficiency ratios
+        if ~isnan(opData.efficiency.setupToProcRatio)
+            fprintf('  Efficiency: Setup/Proc ratio=%.2f', opData.efficiency.setupToProcRatio);
+            if ~isnan(opData.efficiency.postToProcRatio)
+                fprintf(', Post/Proc ratio=%.2f', opData.efficiency.postToProcRatio);
+            end
+            fprintf('\n');
+        end
+    end
+end
+
+function plotData = createOperatorPlottingData(operatorMetrics)
+    % Creates structured data arrays for easy plotting of operator metrics
+    % Returns a structure with arrays organized for plotting
+    
+    operatorNames = fieldnames(operatorMetrics);
+    numOperators = length(operatorNames);
+    
+    if numOperators == 0
+        plotData = struct();
+        return;
+    end
+    
+    % Initialize arrays
+    plotData = struct();
+    plotData.operatorNames = cell(numOperators, 1);
+    plotData.totalCases = zeros(numOperators, 1);
+    
+    % Time metrics arrays
+    plotData.setupTime = struct();
+    plotData.setupTime.mean = NaN(numOperators, 1);
+    plotData.setupTime.median = NaN(numOperators, 1);
+    plotData.setupTime.std = NaN(numOperators, 1);
+    plotData.setupTime.p25 = NaN(numOperators, 1);
+    plotData.setupTime.p75 = NaN(numOperators, 1);
+    plotData.setupTime.p90 = NaN(numOperators, 1);
+    plotData.setupTime.allValues = cell(numOperators, 1);
+    
+    plotData.procedureTime = struct();
+    plotData.procedureTime.mean = NaN(numOperators, 1);
+    plotData.procedureTime.median = NaN(numOperators, 1);
+    plotData.procedureTime.std = NaN(numOperators, 1);
+    plotData.procedureTime.p25 = NaN(numOperators, 1);
+    plotData.procedureTime.p75 = NaN(numOperators, 1);
+    plotData.procedureTime.p90 = NaN(numOperators, 1);
+    plotData.procedureTime.allValues = cell(numOperators, 1);
+    
+    plotData.postTime = struct();
+    plotData.postTime.mean = NaN(numOperators, 1);
+    plotData.postTime.median = NaN(numOperators, 1);
+    plotData.postTime.std = NaN(numOperators, 1);
+    plotData.postTime.p25 = NaN(numOperators, 1);
+    plotData.postTime.p75 = NaN(numOperators, 1);
+    plotData.postTime.p90 = NaN(numOperators, 1);
+    plotData.postTime.allValues = cell(numOperators, 1);
+    
+    plotData.totalCaseTime = struct();
+    plotData.totalCaseTime.mean = NaN(numOperators, 1);
+    plotData.totalCaseTime.median = NaN(numOperators, 1);
+    plotData.totalCaseTime.std = NaN(numOperators, 1);
+    plotData.totalCaseTime.p25 = NaN(numOperators, 1);
+    plotData.totalCaseTime.p75 = NaN(numOperators, 1);
+    plotData.totalCaseTime.p90 = NaN(numOperators, 1);
+    plotData.totalCaseTime.allValues = cell(numOperators, 1);
+    
+    % Efficiency ratios
+    plotData.efficiency = struct();
+    plotData.efficiency.setupToProcRatio = NaN(numOperators, 1);
+    plotData.efficiency.postToProcRatio = NaN(numOperators, 1);
+    
+    % Fill arrays
+    for i = 1:numOperators
+        opName = operatorNames{i};
+        opData = operatorMetrics.(opName);
+        
+        plotData.operatorNames{i} = opData.operatorName;
+        plotData.totalCases(i) = opData.totalCases;
+        
+        % Setup time data
+        if opData.setupTime.validCount > 0
+            plotData.setupTime.mean(i) = opData.setupTime.mean;
+            plotData.setupTime.median(i) = opData.setupTime.median;
+            plotData.setupTime.std(i) = opData.setupTime.std;
+            plotData.setupTime.p25(i) = opData.setupTime.p25;
+            plotData.setupTime.p75(i) = opData.setupTime.p75;
+            plotData.setupTime.p90(i) = opData.setupTime.p90;
+            plotData.setupTime.allValues{i} = opData.setupTime.allValues;
+        else
+            plotData.setupTime.allValues{i} = [];
+        end
+        
+        % Procedure time data
+        if opData.procedureTime.validCount > 0
+            plotData.procedureTime.mean(i) = opData.procedureTime.mean;
+            plotData.procedureTime.median(i) = opData.procedureTime.median;
+            plotData.procedureTime.std(i) = opData.procedureTime.std;
+            plotData.procedureTime.p25(i) = opData.procedureTime.p25;
+            plotData.procedureTime.p75(i) = opData.procedureTime.p75;
+            plotData.procedureTime.p90(i) = opData.procedureTime.p90;
+            plotData.procedureTime.allValues{i} = opData.procedureTime.allValues;
+        else
+            plotData.procedureTime.allValues{i} = [];
+        end
+        
+        % Post time data
+        if opData.postTime.validCount > 0
+            plotData.postTime.mean(i) = opData.postTime.mean;
+            plotData.postTime.median(i) = opData.postTime.median;
+            plotData.postTime.std(i) = opData.postTime.std;
+            plotData.postTime.p25(i) = opData.postTime.p25;
+            plotData.postTime.p75(i) = opData.postTime.p75;
+            plotData.postTime.p90(i) = opData.postTime.p90;
+            plotData.postTime.allValues{i} = opData.postTime.allValues;
+        else
+            plotData.postTime.allValues{i} = [];
+        end
+        
+        % Total case time data
+        if opData.totalCaseTime.validCount > 0
+            plotData.totalCaseTime.mean(i) = opData.totalCaseTime.mean;
+            plotData.totalCaseTime.median(i) = opData.totalCaseTime.median;
+            plotData.totalCaseTime.std(i) = opData.totalCaseTime.std;
+            plotData.totalCaseTime.p25(i) = opData.totalCaseTime.p25;
+            plotData.totalCaseTime.p75(i) = opData.totalCaseTime.p75;
+            plotData.totalCaseTime.p90(i) = opData.totalCaseTime.p90;
+            plotData.totalCaseTime.allValues{i} = opData.totalCaseTime.allValues;
+        else
+            plotData.totalCaseTime.allValues{i} = [];
+        end
+        
+        % Efficiency ratios
+        plotData.efficiency.setupToProcRatio(i) = opData.efficiency.setupToProcRatio;
+        plotData.efficiency.postToProcRatio(i) = opData.efficiency.postToProcRatio;
+    end
+    
+    % Sort all arrays by total cases (descending)
+    [~, sortIdx] = sort(plotData.totalCases, 'descend');
+    
+    plotData.operatorNames = plotData.operatorNames(sortIdx);
+    plotData.totalCases = plotData.totalCases(sortIdx);
+    
+    plotData.setupTime.mean = plotData.setupTime.mean(sortIdx);
+    plotData.setupTime.median = plotData.setupTime.median(sortIdx);
+    plotData.setupTime.std = plotData.setupTime.std(sortIdx);
+    plotData.setupTime.p25 = plotData.setupTime.p25(sortIdx);
+    plotData.setupTime.p75 = plotData.setupTime.p75(sortIdx);
+    plotData.setupTime.p90 = plotData.setupTime.p90(sortIdx);
+    plotData.setupTime.allValues = plotData.setupTime.allValues(sortIdx);
+    
+    plotData.procedureTime.mean = plotData.procedureTime.mean(sortIdx);
+    plotData.procedureTime.median = plotData.procedureTime.median(sortIdx);
+    plotData.procedureTime.std = plotData.procedureTime.std(sortIdx);
+    plotData.procedureTime.p25 = plotData.procedureTime.p25(sortIdx);
+    plotData.procedureTime.p75 = plotData.procedureTime.p75(sortIdx);
+    plotData.procedureTime.p90 = plotData.procedureTime.p90(sortIdx);
+    plotData.procedureTime.allValues = plotData.procedureTime.allValues(sortIdx);
+    
+    plotData.postTime.mean = plotData.postTime.mean(sortIdx);
+    plotData.postTime.median = plotData.postTime.median(sortIdx);
+    plotData.postTime.std = plotData.postTime.std(sortIdx);
+    plotData.postTime.p25 = plotData.postTime.p25(sortIdx);
+    plotData.postTime.p75 = plotData.postTime.p75(sortIdx);
+    plotData.postTime.p90 = plotData.postTime.p90(sortIdx);
+    plotData.postTime.allValues = plotData.postTime.allValues(sortIdx);
+    
+    plotData.totalCaseTime.mean = plotData.totalCaseTime.mean(sortIdx);
+    plotData.totalCaseTime.median = plotData.totalCaseTime.median(sortIdx);
+    plotData.totalCaseTime.std = plotData.totalCaseTime.std(sortIdx);
+    plotData.totalCaseTime.p25 = plotData.totalCaseTime.p25(sortIdx);
+    plotData.totalCaseTime.p75 = plotData.totalCaseTime.p75(sortIdx);
+    plotData.totalCaseTime.p90 = plotData.totalCaseTime.p90(sortIdx);
+    plotData.totalCaseTime.allValues = plotData.totalCaseTime.allValues(sortIdx);
+    
+    plotData.efficiency.setupToProcRatio = plotData.efficiency.setupToProcRatio(sortIdx);
+    plotData.efficiency.postToProcRatio = plotData.efficiency.postToProcRatio(sortIdx);
+end
+
+function [globalProcedureAnalysis, procedureAnalysisByOperator] = performProcedureTimeAnalysis(historicalData, showStats)
+    % Comprehensive procedure time analysis - global and per operator
+    
+    if showStats
+        fprintf('\n=== COMPREHENSIVE PROCEDURE TIME ANALYSIS ===\n');
+    end
+    
+    % Get unique procedures and operators
+    uniqueProcedures = unique(historicalData.procedure);
+    uniqueProcedures = uniqueProcedures(~ismissing(uniqueProcedures) & ~strcmp(uniqueProcedures, ''));
+    
+    uniqueOperators = unique(historicalData.surgeon);
+    uniqueOperators = uniqueOperators(~ismissing(uniqueOperators) & ~strcmp(uniqueOperators, ''));
+    
+    %% GLOBAL PROCEDURE ANALYSIS
+    globalProcedureAnalysis = struct();
+    
+    if showStats
+        fprintf('\n--- Global Procedure Time Statistics ---\n');
+    end
+    
+    for procIdx = 1:length(uniqueProcedures)
+        procedure = uniqueProcedures{procIdx};
+        procIndices = strcmp(historicalData.procedure, procedure);
+        
+        % Get time data for all time components
+        setupTimes = historicalData.setupTime(procIndices);
+        procTimes = historicalData.procedureTime(procIndices);
+        postTimes = historicalData.postTime(procIndices);
+        
+        % Remove invalid/missing values
+        validSetup = setupTimes(~isnan(setupTimes) & setupTimes > 0);
+        validProc = procTimes(~isnan(procTimes) & procTimes > 0);
+        validPost = postTimes(~isnan(postTimes) & postTimes > 0);
+        
+        % Initialize procedure structure
+        procStats = struct();
+        procStats.procedureName = procedure;
+        procStats.totalCases = sum(procIndices);
+        
+        % Setup time statistics
+        if ~isempty(validSetup)
+            procStats.setupTime = struct(...
+                'mean', mean(validSetup), ...
+                'median', median(validSetup), ...
+                'std', std(validSetup), ...
+                'min', min(validSetup), ...
+                'max', max(validSetup), ...
+                'p25', prctile(validSetup, 25), ...
+                'p75', prctile(validSetup, 75), ...
+                'p90', prctile(validSetup, 90), ...
+                'validCount', length(validSetup), ...
+                'allValues', validSetup);
+        else
+            procStats.setupTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Procedure time statistics
+        if ~isempty(validProc)
+            procStats.procedureTime = struct(...
+                'mean', mean(validProc), ...
+                'median', median(validProc), ...
+                'std', std(validProc), ...
+                'min', min(validProc), ...
+                'max', max(validProc), ...
+                'p25', prctile(validProc, 25), ...
+                'p75', prctile(validProc, 75), ...
+                'p90', prctile(validProc, 90), ...
+                'validCount', length(validProc), ...
+                'allValues', validProc);
+        else
+            procStats.procedureTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Post time statistics
+        if ~isempty(validPost)
+            procStats.postTime = struct(...
+                'mean', mean(validPost), ...
+                'median', median(validPost), ...
+                'std', std(validPost), ...
+                'min', min(validPost), ...
+                'max', max(validPost), ...
+                'p25', prctile(validPost, 25), ...
+                'p75', prctile(validPost, 75), ...
+                'p90', prctile(validPost, 90), ...
+                'validCount', length(validPost), ...
+                'allValues', validPost);
+        else
+            procStats.postTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Total case time
+        totalCaseTimes = [];
+        for caseIdx = 1:length(setupTimes)
+            setupT = setupTimes(caseIdx);
+            procT = procTimes(caseIdx);
+            postT = postTimes(caseIdx);
+            
+            if ~isnan(setupT) && ~isnan(procT) && ~isnan(postT) && setupT > 0 && procT > 0 && postT > 0
+                totalCaseTimes = [totalCaseTimes, setupT + procT + postT];
+            end
+        end
+        
+        if ~isempty(totalCaseTimes)
+            procStats.totalCaseTime = struct(...
+                'mean', mean(totalCaseTimes), ...
+                'median', median(totalCaseTimes), ...
+                'std', std(totalCaseTimes), ...
+                'min', min(totalCaseTimes), ...
+                'max', max(totalCaseTimes), ...
+                'p25', prctile(totalCaseTimes, 25), ...
+                'p75', prctile(totalCaseTimes, 75), ...
+                'p90', prctile(totalCaseTimes, 90), ...
+                'validCount', length(totalCaseTimes), ...
+                'allValues', totalCaseTimes);
+        else
+            procStats.totalCaseTime = struct('validCount', 0, 'allValues', []);
+        end
+        
+        % Store using valid field name
+        fieldName = matlab.lang.makeValidName(procedure);
+        globalProcedureAnalysis.(fieldName) = procStats;
+        
+        % Display if requested
+        if showStats && procStats.procedureTime.validCount >= 5
+            fprintf('%s (%d cases):\n', procedure, procStats.totalCases);
+            if procStats.setupTime.validCount > 0
+                fprintf('  Setup: Mean=%.1f, Median=%.1f, P25=%.1f, P75=%.1f, P90=%.1f min\n', ...
+                    procStats.setupTime.mean, procStats.setupTime.median, ...
+                    procStats.setupTime.p25, procStats.setupTime.p75, procStats.setupTime.p90);
+            end
+            if procStats.procedureTime.validCount > 0
+                fprintf('  Procedure: Mean=%.1f, Median=%.1f, P25=%.1f, P75=%.1f, P90=%.1f min\n', ...
+                    procStats.procedureTime.mean, procStats.procedureTime.median, ...
+                    procStats.procedureTime.p25, procStats.procedureTime.p75, procStats.procedureTime.p90);
+            end
+            if procStats.postTime.validCount > 0
+                fprintf('  Post: Mean=%.1f, Median=%.1f, P25=%.1f, P75=%.1f, P90=%.1f min\n', ...
+                    procStats.postTime.mean, procStats.postTime.median, ...
+                    procStats.postTime.p25, procStats.postTime.p75, procStats.postTime.p90);
+            end
+        end
+    end
+    
+    %% PROCEDURE ANALYSIS BY OPERATOR
+    procedureAnalysisByOperator = struct();
+    
+    if showStats
+        fprintf('\n--- Procedure Time Analysis by Operator ---\n');
+    end
+    
+    for opIdx = 1:length(uniqueOperators)
+        operator = uniqueOperators{opIdx};
+        operatorIndices = strcmp(historicalData.surgeon, operator);
+        
+        % Get procedures for this operator
+        operatorProcedures = historicalData.procedure(operatorIndices);
+        operatorProcedures = operatorProcedures(~ismissing(operatorProcedures) & ~strcmp(operatorProcedures, ''));
+        uniqueOpProcedures = unique(operatorProcedures);
+        
+        % Initialize operator structure
+        opProcAnalysis = struct();
+        opProcAnalysis.operatorName = operator;
+        opProcAnalysis.totalCases = sum(operatorIndices);
+        
+        % Analyze each procedure for this operator
+        for procIdx = 1:length(uniqueOpProcedures)
+            procedure = uniqueOpProcedures{procIdx};
+            
+            % Get indices for this operator and procedure combination
+            combinedIndices = operatorIndices & strcmp(historicalData.procedure, procedure);
+            
+            % Get time data
+            setupTimes = historicalData.setupTime(combinedIndices);
+            procTimes = historicalData.procedureTime(combinedIndices);
+            postTimes = historicalData.postTime(combinedIndices);
+            
+            % Remove invalid/missing values
+            validSetup = setupTimes(~isnan(setupTimes) & setupTimes > 0);
+            validProc = procTimes(~isnan(procTimes) & procTimes > 0);
+            validPost = postTimes(~isnan(postTimes) & postTimes > 0);
+            
+            % Only include if we have sufficient data
+            if length(validProc) >= 3  % Need at least 3 cases for meaningful statistics
+                procOpStats = struct();
+                procOpStats.procedureName = procedure;
+                procOpStats.caseCount = sum(combinedIndices);
+                
+                % Setup time statistics
+                if ~isempty(validSetup)
+                    procOpStats.setupTime = struct(...
+                        'mean', mean(validSetup), ...
+                        'median', median(validSetup), ...
+                        'std', std(validSetup), ...
+                        'p25', prctile(validSetup, 25), ...
+                        'p75', prctile(validSetup, 75), ...
+                        'p90', prctile(validSetup, 90), ...
+                        'validCount', length(validSetup), ...
+                        'allValues', validSetup);
+                else
+                    procOpStats.setupTime = struct('validCount', 0, 'allValues', []);
+                end
+                
+                % Procedure time statistics
+                if ~isempty(validProc)
+                    procOpStats.procedureTime = struct(...
+                        'mean', mean(validProc), ...
+                        'median', median(validProc), ...
+                        'std', std(validProc), ...
+                        'p25', prctile(validProc, 25), ...
+                        'p75', prctile(validProc, 75), ...
+                        'p90', prctile(validProc, 90), ...
+                        'validCount', length(validProc), ...
+                        'allValues', validProc);
+                else
+                    procOpStats.procedureTime = struct('validCount', 0, 'allValues', []);
+                end
+                
+                % Post time statistics
+                if ~isempty(validPost)
+                    procOpStats.postTime = struct(...
+                        'mean', mean(validPost), ...
+                        'median', median(validPost), ...
+                        'std', std(validPost), ...
+                        'p25', prctile(validPost, 25), ...
+                        'p75', prctile(validPost, 75), ...
+                        'p90', prctile(validPost, 90), ...
+                        'validCount', length(validPost), ...
+                        'allValues', validPost);
+                else
+                    procOpStats.postTime = struct('validCount', 0, 'allValues', []);
+                end
+                
+                % Total case time (only if all three components are available)
+                totalCaseTimes = [];
+                for caseIdx = 1:length(setupTimes)
+                    setupT = setupTimes(caseIdx);
+                    procT = procTimes(caseIdx);
+                    postT = postTimes(caseIdx);
+                    
+                    if ~isnan(setupT) && ~isnan(procT) && ~isnan(postT) && setupT > 0 && procT > 0 && postT > 0
+                        totalCaseTimes = [totalCaseTimes, setupT + procT + postT];
+                    end
+                end
+                
+                if ~isempty(totalCaseTimes)
+                    procOpStats.totalCaseTime = struct(...
+                        'mean', mean(totalCaseTimes), ...
+                        'median', median(totalCaseTimes), ...
+                        'std', std(totalCaseTimes), ...
+                        'p25', prctile(totalCaseTimes, 25), ...
+                        'p75', prctile(totalCaseTimes, 75), ...
+                        'p90', prctile(totalCaseTimes, 90), ...
+                        'validCount', length(totalCaseTimes), ...
+                        'allValues', totalCaseTimes);
+                else
+                    procOpStats.totalCaseTime = struct('validCount', 0, 'allValues', []);
+                end
+                
+                % Store using valid field name
+                procFieldName = matlab.lang.makeValidName(procedure);
+                opProcAnalysis.(procFieldName) = procOpStats;
+            end
+        end
+        
+        % Store operator analysis using valid field name
+        opFieldName = matlab.lang.makeValidName(operator);
+        procedureAnalysisByOperator.(opFieldName) = opProcAnalysis;
+        
+        % Display top procedures for this operator if requested
+        if showStats && opProcAnalysis.totalCases >= 10
+            opProcFields = fieldnames(opProcAnalysis);
+            procFields = opProcFields(~strcmp(opProcFields, 'operatorName') & ~strcmp(opProcFields, 'totalCases'));
+            
+            if ~isempty(procFields)
+                fprintf('\n%s (%d total cases):\n', operator, opProcAnalysis.totalCases);
+                for i = 1:min(3, length(procFields))  % Show top 3 procedures
+                    procField = procFields{i};
+                    procData = opProcAnalysis.(procField);
+                    if procData.procedureTime.validCount > 0
+                        setupMean = NaN;
+                        if procData.setupTime.validCount > 0
+                            setupMean = procData.setupTime.mean;
+                        end
+                        postMean = NaN;
+                        if procData.postTime.validCount > 0
+                            postMean = procData.postTime.mean;
+                        end
+                        
+                        fprintf('  %s (%d cases): Setup=%.1f, Proc=%.1f (P25=%.1f, P75=%.1f, P90=%.1f), Post=%.1f min\n', ...
+                            procData.procedureName, procData.caseCount, ...
+                            setupMean, procData.procedureTime.mean, ...
+                            procData.procedureTime.p25, procData.procedureTime.p75, procData.procedureTime.p90, ...
+                            postMean);
+                    end
+                end
+            end
+        end
+    end
+    
+    if showStats
+        fprintf('\nProcedure time analysis complete!\n');
+        fprintf('Global analysis: %d procedure types\n', length(fieldnames(globalProcedureAnalysis)));
+        fprintf('Per-operator analysis: %d operators\n', length(fieldnames(procedureAnalysisByOperator)));
+    end
+end
+
+function procedurePlottingData = createProcedurePlottingData(globalAnalysis, operatorAnalysis)
+    % Creates structured data arrays for easy plotting of procedure metrics
+    
+    procedurePlottingData = struct();
+    
+    % Global procedure plotting data
+    globalFields = fieldnames(globalAnalysis);
+    numProcedures = length(globalFields);
+    
+    if numProcedures > 0
+        % Initialize global arrays
+        global_data = struct();
+        global_data.procedureNames = cell(numProcedures, 1);
+        global_data.totalCases = zeros(numProcedures, 1);
+        
+        % Time metrics arrays for global data
+        time_metrics = {'setupTime', 'procedureTime', 'postTime', 'totalCaseTime'};
+        for metric = time_metrics
+            metricName = metric{1};
+            global_data.(metricName) = struct();
+            global_data.(metricName).mean = NaN(numProcedures, 1);
+            global_data.(metricName).median = NaN(numProcedures, 1);
+            global_data.(metricName).std = NaN(numProcedures, 1);
+            global_data.(metricName).p25 = NaN(numProcedures, 1);
+            global_data.(metricName).p75 = NaN(numProcedures, 1);
+            global_data.(metricName).p90 = NaN(numProcedures, 1);
+            global_data.(metricName).allValues = cell(numProcedures, 1);
+        end
+        
+        % Fill global arrays
+        for i = 1:numProcedures
+            procField = globalFields{i};
+            procData = globalAnalysis.(procField);
+            
+            global_data.procedureNames{i} = procData.procedureName;
+            global_data.totalCases(i) = procData.totalCases;
+            
+            % Fill time metrics
+            for metric = time_metrics
+                metricName = metric{1};
+                if procData.(metricName).validCount > 0
+                    global_data.(metricName).mean(i) = procData.(metricName).mean;
+                    global_data.(metricName).median(i) = procData.(metricName).median;
+                    global_data.(metricName).std(i) = procData.(metricName).std;
+                    global_data.(metricName).p25(i) = procData.(metricName).p25;
+                    global_data.(metricName).p75(i) = procData.(metricName).p75;
+                    global_data.(metricName).p90(i) = procData.(metricName).p90;
+                    global_data.(metricName).allValues{i} = procData.(metricName).allValues;
+                else
+                    global_data.(metricName).allValues{i} = [];
+                end
+            end
+        end
+        
+        % Sort by total cases (descending)
+        [~, sortIdx] = sort(global_data.totalCases, 'descend');
+        
+        global_data.procedureNames = global_data.procedureNames(sortIdx);
+        global_data.totalCases = global_data.totalCases(sortIdx);
+        
+        for metric = time_metrics
+            metricName = metric{1};
+            global_data.(metricName).mean = global_data.(metricName).mean(sortIdx);
+            global_data.(metricName).median = global_data.(metricName).median(sortIdx);
+            global_data.(metricName).std = global_data.(metricName).std(sortIdx);
+            global_data.(metricName).p25 = global_data.(metricName).p25(sortIdx);
+            global_data.(metricName).p75 = global_data.(metricName).p75(sortIdx);
+            global_data.(metricName).p90 = global_data.(metricName).p90(sortIdx);
+            global_data.(metricName).allValues = global_data.(metricName).allValues(sortIdx);
+        end
+        
+        procedurePlottingData.global = global_data;
+    else
+        procedurePlottingData.global = struct();
+    end
+    
+    % Operator-specific procedure plotting data
+    operatorFields = fieldnames(operatorAnalysis);
+    procedurePlottingData.byOperator = struct();
+    
+    for opIdx = 1:length(operatorFields)
+        opField = operatorFields{opIdx};
+        opData = operatorAnalysis.(opField);
+        
+        % Get procedure fields for this operator (exclude metadata fields)
+        opProcFields = fieldnames(opData);
+        opProcFields = opProcFields(~strcmp(opProcFields, 'operatorName') & ~strcmp(opProcFields, 'totalCases'));
+        
+        if ~isempty(opProcFields)
+            numOpProcs = length(opProcFields);
+            
+            % Initialize operator-specific arrays
+            op_plot_data = struct();
+            op_plot_data.operatorName = opData.operatorName;
+            op_plot_data.totalCases = opData.totalCases;
+            op_plot_data.procedureNames = cell(numOpProcs, 1);
+            op_plot_data.caseCounts = zeros(numOpProcs, 1);
+            
+            % Time metrics arrays for operator data
+            for metric = time_metrics
+                metricName = metric{1};
+                op_plot_data.(metricName) = struct();
+                op_plot_data.(metricName).mean = NaN(numOpProcs, 1);
+                op_plot_data.(metricName).median = NaN(numOpProcs, 1);
+                op_plot_data.(metricName).std = NaN(numOpProcs, 1);
+                op_plot_data.(metricName).p25 = NaN(numOpProcs, 1);
+                op_plot_data.(metricName).p75 = NaN(numOpProcs, 1);
+                op_plot_data.(metricName).p90 = NaN(numOpProcs, 1);
+                op_plot_data.(metricName).allValues = cell(numOpProcs, 1);
+            end
+            
+            % Fill operator arrays
+            for j = 1:numOpProcs
+                procField = opProcFields{j};
+                procData = opData.(procField);
+                
+                op_plot_data.procedureNames{j} = procData.procedureName;
+                op_plot_data.caseCounts(j) = procData.caseCount;
+                
+                % Fill time metrics
+                for metric = time_metrics
+                    metricName = metric{1};
+                    if procData.(metricName).validCount > 0
+                        op_plot_data.(metricName).mean(j) = procData.(metricName).mean;
+                        op_plot_data.(metricName).median(j) = procData.(metricName).median;
+                        op_plot_data.(metricName).std(j) = procData.(metricName).std;
+                        op_plot_data.(metricName).p25(j) = procData.(metricName).p25;
+                        op_plot_data.(metricName).p75(j) = procData.(metricName).p75;
+                        op_plot_data.(metricName).p90(j) = procData.(metricName).p90;
+                        op_plot_data.(metricName).allValues{j} = procData.(metricName).allValues;
+                    else
+                        op_plot_data.(metricName).allValues{j} = [];
+                    end
+                end
+            end
+            
+            % Sort by case count (descending)
+            [~, sortIdx] = sort(op_plot_data.caseCounts, 'descend');
+            
+            op_plot_data.procedureNames = op_plot_data.procedureNames(sortIdx);
+            op_plot_data.caseCounts = op_plot_data.caseCounts(sortIdx);
+            
+            for metric = time_metrics
+                metricName = metric{1};
+                op_plot_data.(metricName).mean = op_plot_data.(metricName).mean(sortIdx);
+                op_plot_data.(metricName).median = op_plot_data.(metricName).median(sortIdx);
+                op_plot_data.(metricName).std = op_plot_data.(metricName).std(sortIdx);
+                op_plot_data.(metricName).p25 = op_plot_data.(metricName).p25(sortIdx);
+                op_plot_data.(metricName).p75 = op_plot_data.(metricName).p75(sortIdx);
+                op_plot_data.(metricName).p90 = op_plot_data.(metricName).p90(sortIdx);
+                op_plot_data.(metricName).allValues = op_plot_data.(metricName).allValues(sortIdx);
+            end
+            
+            procedurePlottingData.byOperator.(opField) = op_plot_data;
+        end
+    end
 end
 
 %% Display Operator Idle Time and Lab Flip Analysis
