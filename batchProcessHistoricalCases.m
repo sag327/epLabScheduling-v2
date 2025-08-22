@@ -982,7 +982,7 @@ caseData = struct();
 
 % Core identification fields
 caseData.caseID = cell(numCases, 1);
-caseData.date = cell(numCases, 1);
+caseData.date = NaT(numCases, 1);
 caseData.surgeon = cell(numCases, 1);
 
 % Procedure information
@@ -1014,28 +1014,27 @@ for i = 1:numCases
     % Core fields
     caseData.caseID{i} = ensureChar(case_data.caseID);
     
-    % Handle date field - convert to dd-MMM-yyyy format to match loadHistoricalDataFromFile.m
+    % Handle date field - store as datetime to match loadHistoricalDataFromFile.m
     if isfield(case_data, 'procedureDate')
         if isdatetime(case_data.procedureDate)
-            caseData.date{i} = char(case_data.procedureDate, 'dd-MMM-yyyy');
+            caseData.date(i) = case_data.procedureDate;
         else
-            % Convert from mm-dd-yyyy format to dd-MMM-yyyy format
+            % Convert from mm-dd-yyyy format to datetime
             dateStr = ensureChar(case_data.procedureDate);
             if ~isempty(dateStr) && length(dateStr) == 10 && contains(dateStr, '-')
                 try
-                    % Parse mm-dd-yyyy format and convert to dd-MMM-yyyy
-                    dt = datetime(dateStr, 'InputFormat', 'MM-dd-yyyy');
-                    caseData.date{i} = char(dt, 'dd-MMM-yyyy');
+                    % Parse mm-dd-yyyy format and convert to datetime
+                    caseData.date(i) = datetime(dateStr, 'InputFormat', 'MM-dd-yyyy');
                 catch
-                    % If parsing fails, keep original
-                    caseData.date{i} = dateStr;
+                    % If parsing fails, use NaT
+                    caseData.date(i) = NaT;
                 end
             else
-                caseData.date{i} = dateStr;
+                caseData.date(i) = NaT;
             end
         end
     else
-        caseData.date{i} = '';
+        caseData.date(i) = NaT;
     end
     
     caseData.surgeon{i} = ensureChar(case_data.operatorName);
