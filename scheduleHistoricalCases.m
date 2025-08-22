@@ -19,7 +19,7 @@ function [schedule, results] = scheduleHistoricalCases(cases, varargin)
 %   'maxOperatorTime' - Maximum time per operator in minutes (default: 480, 8 hours)
 %   'turnoverTime' - Room turnover time between cases in minutes (default: 15)
 %   'enforceMiddnight' - Ensure all cases complete before midnight (default: true)
-%   'prioritizeOutpatient' - Schedule outpatient cases first, then remaining cases (default: false)
+%   'prioritizeOutpatient' - Schedule outpatient cases first, then remaining cases (default: true)
 %   'verbose' - Display detailed output (default: true)
 %
 % Outputs:
@@ -36,7 +36,7 @@ addParameter(p, 'caseFilter', 'all', @(x) ismember(x, {'all', 'outpatient', 'inp
 addParameter(p, 'maxOperatorTime', 480, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'turnoverTime', 15, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'enforceMiddnight', true, @islogical);
-addParameter(p, 'prioritizeOutpatient', false, @islogical);
+addParameter(p, 'prioritizeOutpatient', true, @islogical);
 addParameter(p, 'verbose', true, @islogical);
 
 parse(p, cases, varargin{:});
