@@ -931,7 +931,16 @@ formattedSchedules = containers.Map();
 
 for i = 1:length(processedDates)
     if ~isempty(processedDates{i}) && ~isempty(dailySchedules{i}) && ~isempty(dailyResults{i})
-        dateStr = processedDates{i};
+        originalDateStr = processedDates{i};
+        
+        % Convert date format from mm-dd-yyyy to dd-MMM-yyyy to match loadHistoricalDataFromFile.m
+        try
+            dt = datetime(originalDateStr, 'InputFormat', 'MM-dd-yyyy');
+            dateStr = char(dt, 'dd-MMM-yyyy');
+        catch
+            % If parsing fails, use original
+            dateStr = originalDateStr;
+        end
         
         % Create schedule data structure matching loadHistoricalDataFromFile format
         scheduleData = struct();
@@ -973,7 +982,7 @@ caseData = struct();
 
 % Core identification fields
 caseData.caseID = cell(numCases, 1);
-caseData.date = NaT(numCases, 1);
+caseData.date = cell(numCases, 1);
 caseData.surgeon = cell(numCases, 1);
 
 % Procedure information
@@ -1005,12 +1014,25 @@ for i = 1:numCases
     % Core fields
     caseData.caseID{i} = ensureChar(case_data.caseID);
     
-    % Handle date field - convert to string if datetime
+    % Handle date field - convert to dd-MMM-yyyy format to match loadHistoricalDataFromFile.m
     if isfield(case_data, 'procedureDate')
         if isdatetime(case_data.procedureDate)
             caseData.date{i} = char(case_data.procedureDate, 'dd-MMM-yyyy');
         else
-            caseData.date{i} = ensureChar(case_data.procedureDate);
+            % Convert from mm-dd-yyyy format to dd-MMM-yyyy format
+            dateStr = ensureChar(case_data.procedureDate);
+            if ~isempty(dateStr) && length(dateStr) == 10 && contains(dateStr, '-')
+                try
+                    % Parse mm-dd-yyyy format and convert to dd-MMM-yyyy
+                    dt = datetime(dateStr, 'InputFormat', 'MM-dd-yyyy');
+                    caseData.date{i} = char(dt, 'dd-MMM-yyyy');
+                catch
+                    % If parsing fails, keep original
+                    caseData.date{i} = dateStr;
+                end
+            else
+                caseData.date{i} = dateStr;
+            end
         end
     else
         caseData.date{i} = '';
