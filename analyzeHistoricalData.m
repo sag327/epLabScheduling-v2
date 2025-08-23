@@ -657,16 +657,25 @@ function averages = calculateMultiProcedureAverages(operatorCaseStats, operatorI
             if ~isempty(validCases)
                 opAverages.avgCasesPerMultiProcDay = mean(validCases);
                 
-                % Calculate flip to turnover ratio
-                % Number of turnovers = number of cases - 1 (for each multi-procedure day)
-                avgTurnovers = opAverages.avgCasesPerMultiProcDay - 1;
-                if avgTurnovers > 0
-                    if ~isempty(validFlips)
-                        opAverages.flipToTurnoverRatio = mean(validFlips) / avgTurnovers;
+                % Calculate flip to turnover ratio using Method 1: mean of daily ratios
+                if ~isempty(validFlips) && ~isempty(validCases) && length(validFlips) == length(validCases)
+                    % Calculate daily flip-to-turnover ratios
+                    dailyRatios = [];
+                    for j = 1:length(validCases)
+                        turnovers = validCases(j) - 1;
+                        if turnovers > 0
+                            dailyRatios(end+1) = validFlips(j) / turnovers;
+                        end
+                    end
+                    
+                    if ~isempty(dailyRatios)
+                        opAverages.flipToTurnoverRatio = mean(dailyRatios);
                     else
-                        % If no valid flips but valid cases, ratio is 0
                         opAverages.flipToTurnoverRatio = 0;
                     end
+                else
+                    % If no valid flips or cases mismatch, ratio is 0
+                    opAverages.flipToTurnoverRatio = 0;
                 end
             end
         end
@@ -2091,10 +2100,8 @@ for i = 1:numOperators
                 opMetrics.medianIdleTimePerDay = opMetrics.avgIdleTimePerDay;
             end
             
-            if isfield(scheduleMetrics, 'avgFlips')
-                opMetrics.avgFlipToTurnoverRatio = scheduleMetrics.avgFlips * 100; % Convert to percentage
-            elseif isfield(scheduleMetrics, 'flipToTurnoverRatio')
-                opMetrics.avgFlipToTurnoverRatio = scheduleMetrics.flipToTurnoverRatio;
+            if isfield(scheduleMetrics, 'flipToTurnoverRatio')
+                opMetrics.avgFlipToTurnoverRatio = scheduleMetrics.flipToTurnoverRatio * 100; % Convert to percentage
             else
                 opMetrics.avgFlipToTurnoverRatio = NaN;
             end
@@ -2200,6 +2207,7 @@ for i = 1:numOperators
                 opMetrics.minFlipToTurnoverRatio = min(validFlipRatios) * 100;
                 opMetrics.maxFlipToTurnoverRatio = max(validFlipRatios) * 100;
                 
+                % Only set if not already calculated from multiProcedureDayAverages
                 if isnan(opMetrics.avgFlipToTurnoverRatio)
                     opMetrics.avgFlipToTurnoverRatio = mean(validFlipRatios) * 100;
                 end
