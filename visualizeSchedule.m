@@ -272,8 +272,26 @@ for i = 1:numLabs
 end
 xticklabels(ax1, labLabels);
 
-% Add title and formatting
-title(ax1, chartTitle, 'FontSize', 16, 'FontWeight', 'bold', 'Color', 'black');
+% Extract date from cases and add to title
+scheduleDate = '';
+if ~isempty(allCases) && isfield(allCases(1), 'date') && ~isempty(allCases(1).date)
+    % Get date from first case (all cases should be from same date)
+    dateStr = allCases(1).date;
+    try
+        % Parse and format the date nicely
+        if ischar(dateStr) || isstring(dateStr)
+            dt = datetime(dateStr, 'InputFormat', 'dd-MMM-yyyy');
+            scheduleDate = sprintf(' - %s', datestr(dt, 'mmm dd, yyyy'));
+        end
+    catch
+        % If date parsing fails, use the raw date string
+        scheduleDate = sprintf(' - %s', char(dateStr));
+    end
+end
+
+% Add title with date and formatting
+titleWithDate = sprintf('%s%s', chartTitle, scheduleDate);
+title(ax1, titleWithDate, 'FontSize', 16, 'FontWeight', 'bold', 'Color', 'black');
 xlabel(ax1, '');  % No x-label for main chart
 ylabel(ax1, 'Time of Day', 'Color', 'black');
 

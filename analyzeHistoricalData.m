@@ -123,6 +123,12 @@ else
     analysisResults.labFlipAnalysis = [];
 end
 
+% Create comprehensive operator metrics for statistical analysis
+if showStats
+    fprintf('\n=== CREATING COMPREHENSIVE OPERATOR METRICS ===\n');
+end
+analysisResults.comprehensiveOperatorMetrics = createComprehensiveOperatorMetrics(historicalData, analysisResults.operatorAnalysis, showStats);
+
 % Save analysis report if requested
 if saveReport
     saveAnalysisReport(historicalData, reportFile);
@@ -502,11 +508,12 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
                 if numCases > 0
                     caseArray(i) = numCases;
                     
-                    % Store idle time (if operator was active)
+                    % Store idle time (only if operator had multiple cases, since single-case days can't have idle time)
                     if isKey(dayIdleStats, opName)
                         idleArray(i) = dayIdleStats(opName);
                     else
-                        idleArray(i) = 0;  % Active but no idle time
+                        % Operator not in dayIdleStats means they had single case this day - leave as NaN
+                        % idleArray(i) remains NaN (from initialization)
                     end
                     
                     % Store lab flip count (set to 0 if no flips, but operator was active)
@@ -740,18 +747,18 @@ function displayOperatorAnalysis(operatorCaseStats, operatorWorkTimeStats, analy
     operatorTotalCases = zeros(length(operatorNames), 1);
     for i = 1:length(operatorNames)
         caseArray = operatorCaseStats(operatorNames{i});
-        operatorTotalCases(i) = sum(caseArray);
+        operatorTotalCases(i) = sum(caseArray, 'omitnan');
     end
     [~, sortIdx] = sort(operatorTotalCases, 'descend');
     
     fprintf('Operator workload summary:\n');
-    for i = 1:min(10, length(sortIdx))
+    for i = 1:length(sortIdx)
         idx = sortIdx(i);
         opName = operatorNames{idx};
         caseArray = operatorCaseStats(opName);
         workTimeArray = operatorWorkTimeStats(opName);
         
-        totalCases = sum(caseArray);
+        totalCases = sum(caseArray, 'omitnan');
         activeDays = sum(caseArray > 0);
         avgCasesPerActiveDay = totalCases / max(activeDays, 1);
         stdCasesPerActiveDay = std(caseArray(caseArray > 0));
@@ -1770,16 +1777,14 @@ function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips
         opName = operatorNames{i};
         opSchedule = operators(opName);
         
-        % Initialize operator stats
-        idleStats(opName) = 0;
-        flipStats(opName) = 0;
-        
         % Get operator's schedule for the day
         if isstruct(opSchedule) && length(opSchedule) == 1
-            % Single case - no idle time or flips
+            % Single case - no idle time or flips possible, don't add to stats
             continue;
         elseif isstruct(opSchedule) && length(opSchedule) > 1
-            % Multiple cases - analyze idle time and lab flips
+            % Multiple cases - initialize stats and analyze idle time and lab flips
+            idleStats(opName) = 0;
+            flipStats(opName) = 0;
             totalIdleTime = 0;
             labFlipCount = 0;
             
@@ -1825,4 +1830,543 @@ function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips
     
     % Count total daily lab flips across all operators
     % This is already counted in the loop above via totalLabFlips
+end
+
+%% Comprehensive Operator Metrics Function
+function comprehensiveMetrics = createComprehensiveOperatorMetrics(historicalData, operatorAnalysis, showStats)
+% Create detailed operator metrics for statistical analysis
+% This function extracts comprehensive metrics directly from raw historical data
+% and combines them with schedule-based analysis
+
+if showStats
+    fprintf('Creating comprehensive metrics for statistical analysis...\n');
+end
+
+% Initialize output structure
+comprehensiveMetrics = struct();
+
+% Get unique operators from historical data
+if isfield(historicalData, 'surgeon')
+    allOperators = string(historicalData.surgeon);
+    uniqueOperators = unique(allOperators(~ismissing(allOperators)));
+    uniqueOperators = cellstr(uniqueOperators);
+else
+    if showStats
+        fprintf('  Warning: No surgeon field found in historical data\n');
+    end
+    uniqueOperators = {};
+    return;
+end
+
+numOperators = length(uniqueOperators);
+if showStats
+    fprintf('  Processing %d operators from historical data...\n', numOperators);
+end
+
+% Initialize metrics structure for each operator
+for i = 1:numOperators
+    opName = uniqueOperators{i};
+    safeOpName = matlab.lang.makeValidName(opName);
+    
+    if showStats && mod(i, 10) == 1
+        fprintf('    Processing operator %d/%d: %s\n', i, numOperators, opName);
+    end
+    
+    % Find all cases for this operator
+    operatorMask = strcmp(string(historicalData.surgeon), opName);
+    opCases = find(operatorMask);
+    
+    if isempty(opCases)
+        continue;
+    end
+    
+    % Initialize operator metrics
+    opMetrics = struct();
+    opMetrics.name = opName;
+    opMetrics.totalCases = length(opCases);
+    
+    %% BASIC WORKING PATTERN METRICS
+    % Get unique working dates
+    opDates = historicalData.date(opCases);
+    uniqueDates = unique(string(opDates(~ismissing(opDates))));
+    opMetrics.workingDays = length(uniqueDates);
+    opMetrics.workingDates = uniqueDates;
+    
+    % Calculate cases per day statistics
+    dailyCaseCounts = [];
+    for d = 1:length(uniqueDates)
+        dateStr = uniqueDates{d};
+        casesThisDate = sum(strcmp(string(opDates), dateStr));
+        dailyCaseCounts(end+1) = casesThisDate;
+    end
+    
+    opMetrics.avgCasesPerDay = mean(dailyCaseCounts);
+    opMetrics.medianCasesPerDay = median(dailyCaseCounts);
+    opMetrics.stdCasesPerDay = std(dailyCaseCounts);
+    opMetrics.minCasesPerDay = min(dailyCaseCounts);
+    opMetrics.maxCasesPerDay = max(dailyCaseCounts);
+    opMetrics.dailyCaseCounts = dailyCaseCounts;
+    
+    % Multi-procedure day analysis
+    opMetrics.multiProcedureDays = sum(dailyCaseCounts > 1);
+    opMetrics.multiProcedureDaysPct = (sum(dailyCaseCounts > 1) / length(dailyCaseCounts)) * 100;
+    
+    % Store the actual dates that had multiple procedures
+    multiProcMask = dailyCaseCounts > 1;
+    opMetrics.multiProcedureDates = uniqueDates(multiProcMask);
+    opMetrics.multiProcedureDateCounts = dailyCaseCounts(multiProcMask);
+    
+    %% PROCEDURE DURATION METRICS
+    procTimes = historicalData.procedureTime(opCases);
+    validProcTimes = procTimes(~isnan(procTimes) & procTimes > 0);
+    
+    if ~isempty(validProcTimes)
+        opMetrics.avgProcedureTime = mean(validProcTimes);
+        opMetrics.medianProcedureTime = median(validProcTimes);
+        opMetrics.stdProcedureTime = std(validProcTimes);
+        opMetrics.p25ProcedureTime = prctile(validProcTimes, 25);
+        opMetrics.p75ProcedureTime = prctile(validProcTimes, 75);
+        opMetrics.p90ProcedureTime = prctile(validProcTimes, 90);
+    else
+        opMetrics.avgProcedureTime = NaN;
+        opMetrics.medianProcedureTime = NaN;
+        opMetrics.stdProcedureTime = NaN;
+        opMetrics.p25ProcedureTime = NaN;
+        opMetrics.p75ProcedureTime = NaN;
+        opMetrics.p90ProcedureTime = NaN;
+    end
+    
+    %% SETUP AND POST TIME METRICS
+    setupTimes = historicalData.setupTime(opCases);
+    validSetupTimes = setupTimes(~isnan(setupTimes) & setupTimes > 0);
+    
+    if ~isempty(validSetupTimes)
+        opMetrics.avgSetupTime = mean(validSetupTimes);
+        opMetrics.medianSetupTime = median(validSetupTimes);
+        opMetrics.stdSetupTime = std(validSetupTimes);
+    else
+        opMetrics.avgSetupTime = NaN;
+        opMetrics.medianSetupTime = NaN;
+        opMetrics.stdSetupTime = NaN;
+    end
+    
+    postTimes = historicalData.postTime(opCases);
+    validPostTimes = postTimes(~isnan(postTimes) & postTimes > 0);
+    
+    if ~isempty(validPostTimes)
+        opMetrics.avgPostTime = mean(validPostTimes);
+        opMetrics.medianPostTime = median(validPostTimes);
+        opMetrics.stdPostTime = std(validPostTimes);
+    else
+        opMetrics.avgPostTime = NaN;
+        opMetrics.medianPostTime = NaN;
+        opMetrics.stdPostTime = NaN;
+    end
+    
+    %% CASE MIX ANALYSIS
+    % Inpatient vs Outpatient analysis
+    if isfield(historicalData, 'admissionStatus')
+        admissionStatuses = string(historicalData.admissionStatus(opCases));
+        
+        inpatientMask = contains(admissionStatuses, 'Inpatient', 'IgnoreCase', true);
+        outpatientMask = contains(admissionStatuses, 'Outpatient', 'IgnoreCase', true);
+        
+        opMetrics.inpatientCases = sum(inpatientMask);
+        opMetrics.outpatientCases = sum(outpatientMask);
+        
+        totalStatusCases = opMetrics.inpatientCases + opMetrics.outpatientCases;
+        if totalStatusCases > 0
+            opMetrics.inpatientProportion = opMetrics.inpatientCases / totalStatusCases;
+            opMetrics.outpatientProportion = opMetrics.outpatientCases / totalStatusCases;
+        else
+            opMetrics.inpatientProportion = 0.5; % Default
+            opMetrics.outpatientProportion = 0.5;
+        end
+    else
+        opMetrics.inpatientCases = 0;
+        opMetrics.outpatientCases = 0;
+        opMetrics.inpatientProportion = 0.5;
+        opMetrics.outpatientProportion = 0.5;
+    end
+    
+    %% PROCEDURE TYPE DIVERSITY ANALYSIS
+    if isfield(historicalData, 'procedure')
+        procedures = string(historicalData.procedure(opCases));
+        uniqueProcedures = unique(procedures(~ismissing(procedures)));
+        
+        opMetrics.uniqueProcedureTypes = length(uniqueProcedures);
+        
+        % Calculate Shannon diversity index
+        procedureFreq = [];
+        for p = 1:length(uniqueProcedures)
+            freq = sum(strcmp(procedures, uniqueProcedures{p}));
+            procedureFreq(end+1) = freq;
+        end
+        
+        totalProcs = sum(procedureFreq);
+        if totalProcs > 0
+            proportions = procedureFreq / totalProcs;
+            shannonIndex = -sum(proportions .* log(proportions + eps)); % Add eps to avoid log(0)
+            opMetrics.procedureDiversityIndex = shannonIndex;
+        else
+            opMetrics.procedureDiversityIndex = 0;
+        end
+        
+        % Store procedure-specific metrics
+        opMetrics.procedureTypes = uniqueProcedures;
+        opMetrics.procedureCounts = procedureFreq;
+        
+        % Calculate procedure-specific duration metrics
+        for p = 1:length(uniqueProcedures)
+            procType = uniqueProcedures{p};
+            safeProcName = matlab.lang.makeValidName(procType);
+            
+            procMask = strcmp(procedures, procType);
+            procIndices = opCases(procMask);
+            
+            % Duration metrics for this procedure type
+            procDurations = historicalData.procedureTime(procIndices);
+            validDurations = procDurations(~isnan(procDurations) & procDurations > 0);
+            
+            if ~isempty(validDurations)
+                opMetrics.(['proc_' safeProcName '_count']) = length(validDurations);
+                opMetrics.(['proc_' safeProcName '_proportion']) = length(validDurations) / opMetrics.totalCases;
+                opMetrics.(['proc_' safeProcName '_avgDuration']) = mean(validDurations);
+                opMetrics.(['proc_' safeProcName '_medianDuration']) = median(validDurations);
+                opMetrics.(['proc_' safeProcName '_stdDuration']) = std(validDurations);
+            else
+                opMetrics.(['proc_' safeProcName '_count']) = 0;
+                opMetrics.(['proc_' safeProcName '_proportion']) = 0;
+                opMetrics.(['proc_' safeProcName '_avgDuration']) = NaN;
+                opMetrics.(['proc_' safeProcName '_medianDuration']) = NaN;
+                opMetrics.(['proc_' safeProcName '_stdDuration']) = NaN;
+            end
+            
+            % Setup time metrics for this procedure type
+            procSetupTimes = historicalData.setupTime(procIndices);
+            validSetupTimes = procSetupTimes(~isnan(procSetupTimes) & procSetupTimes > 0);
+            
+            if ~isempty(validSetupTimes)
+                opMetrics.(['proc_' safeProcName '_avgSetup']) = mean(validSetupTimes);
+                opMetrics.(['proc_' safeProcName '_medianSetup']) = median(validSetupTimes);
+            else
+                opMetrics.(['proc_' safeProcName '_avgSetup']) = NaN;
+                opMetrics.(['proc_' safeProcName '_medianSetup']) = NaN;
+            end
+            
+            % Post time metrics for this procedure type
+            procPostTimes = historicalData.postTime(procIndices);
+            validPostTimes = procPostTimes(~isnan(procPostTimes) & procPostTimes > 0);
+            
+            if ~isempty(validPostTimes)
+                opMetrics.(['proc_' safeProcName '_avgPost']) = mean(validPostTimes);
+                opMetrics.(['proc_' safeProcName '_medianPost']) = median(validPostTimes);
+            else
+                opMetrics.(['proc_' safeProcName '_avgPost']) = NaN;
+                opMetrics.(['proc_' safeProcName '_medianPost']) = NaN;
+            end
+        end
+    else
+        opMetrics.uniqueProcedureTypes = 1;
+        opMetrics.procedureDiversityIndex = 0;
+        opMetrics.procedureTypes = {};
+        opMetrics.procedureCounts = [];
+    end
+    
+    %% SCHEDULE-BASED PERFORMANCE METRICS
+    % Extract metrics from existing operator analysis if available
+    if ~isempty(operatorAnalysis) && isfield(operatorAnalysis, 'multiProcedureDayAverages')
+        if isKey(operatorAnalysis.multiProcedureDayAverages, opName)
+            scheduleMetrics = operatorAnalysis.multiProcedureDayAverages(opName);
+            
+            if isfield(scheduleMetrics, 'avgIdleTime')
+                opMetrics.avgIdleTimePerDay = scheduleMetrics.avgIdleTime;
+            else
+                opMetrics.avgIdleTimePerDay = NaN;
+            end
+            
+            if isfield(scheduleMetrics, 'medianIdleTime')
+                opMetrics.medianIdleTimePerDay = scheduleMetrics.medianIdleTime;
+            else
+                opMetrics.medianIdleTimePerDay = opMetrics.avgIdleTimePerDay;
+            end
+            
+            if isfield(scheduleMetrics, 'avgFlips')
+                opMetrics.avgFlipToTurnoverRatio = scheduleMetrics.avgFlips * 100; % Convert to percentage
+            elseif isfield(scheduleMetrics, 'flipToTurnoverRatio')
+                opMetrics.avgFlipToTurnoverRatio = scheduleMetrics.flipToTurnoverRatio;
+            else
+                opMetrics.avgFlipToTurnoverRatio = NaN;
+            end
+        else
+            opMetrics.avgIdleTimePerDay = NaN;
+            opMetrics.medianIdleTimePerDay = NaN;
+            opMetrics.avgFlipToTurnoverRatio = NaN;
+        end
+        
+        % Get detailed idle time statistics from arrays if available
+        if isfield(operatorAnalysis, 'idleTimeStats') && isKey(operatorAnalysis.idleTimeStats, opName)
+            fullIdleArray = operatorAnalysis.idleTimeStats(opName);
+            
+            % Filter idleArray to only include dates where this operator worked
+            % idleArray has entries for ALL schedule dates, but we only want operator's working dates
+            if isfield(operatorAnalysis, 'analyzedDates')
+                allScheduleDates = operatorAnalysis.analyzedDates;
+                operatorIdleArray = [];
+                
+                for d = 1:length(uniqueDates)
+                    dateStr = uniqueDates{d};
+                    % Find this date in the schedule dates
+                    dateIdx = find(strcmp(allScheduleDates, dateStr), 1);
+                    if ~isempty(dateIdx) && dateIdx <= length(fullIdleArray)
+                        operatorIdleArray(d) = fullIdleArray(dateIdx);
+                    else
+                        operatorIdleArray(d) = NaN;  % Date not in schedule or no data
+                    end
+                end
+                
+                opMetrics.dailyIdleTimes = operatorIdleArray;
+            else
+                % Fallback: use full array (shouldn't happen)
+                opMetrics.dailyIdleTimes = fullIdleArray;
+            end
+            
+            validIdle = opMetrics.dailyIdleTimes(~isnan(opMetrics.dailyIdleTimes));
+            
+            if ~isempty(validIdle)
+                
+                % Calculate comprehensive statistics
+                opMetrics.stdIdleTimePerDay = std(validIdle);
+                opMetrics.p25IdleTimePerDay = prctile(validIdle, 25);
+                opMetrics.p75IdleTimePerDay = prctile(validIdle, 75);
+                opMetrics.p90IdleTimePerDay = prctile(validIdle, 90);
+                opMetrics.minIdleTimePerDay = min(validIdle);
+                opMetrics.maxIdleTimePerDay = max(validIdle);
+                
+                if isnan(opMetrics.avgIdleTimePerDay)
+                    opMetrics.avgIdleTimePerDay = mean(validIdle);
+                    opMetrics.medianIdleTimePerDay = median(validIdle);
+                end
+            else
+                opMetrics.dailyIdleTimes = [];
+                opMetrics.stdIdleTimePerDay = NaN;
+                opMetrics.p25IdleTimePerDay = NaN;
+                opMetrics.p75IdleTimePerDay = NaN;
+                opMetrics.p90IdleTimePerDay = NaN;
+                opMetrics.minIdleTimePerDay = NaN;
+                opMetrics.maxIdleTimePerDay = NaN;
+            end
+        else
+            opMetrics.dailyIdleTimes = [];
+            opMetrics.stdIdleTimePerDay = NaN;
+            opMetrics.p25IdleTimePerDay = NaN;
+            opMetrics.p75IdleTimePerDay = NaN;
+            opMetrics.p90IdleTimePerDay = NaN;
+            opMetrics.minIdleTimePerDay = NaN;
+            opMetrics.maxIdleTimePerDay = NaN;
+        end
+        
+        % Get detailed flip ratio statistics from arrays if available
+        if isfield(operatorAnalysis, 'operatorFlipStats') && isKey(operatorAnalysis.operatorFlipStats, opName)
+            flipArray = operatorAnalysis.operatorFlipStats(opName);
+            
+            % Only include flip ratios from multi-procedure days (where turnovers actually occur)
+            if ~isempty(opMetrics.dailyCaseCounts) && length(flipArray) == length(opMetrics.dailyCaseCounts)
+                % Calculate actual flip-to-turnover ratios for multi-procedure days only
+                multiProcDayFlipRatios = [];
+                for d = 1:length(opMetrics.dailyCaseCounts)
+                    if opMetrics.dailyCaseCounts(d) > 1 && ~isnan(flipArray(d))
+                        turnovers = opMetrics.dailyCaseCounts(d) - 1;
+                        flipRatio = flipArray(d) / turnovers;
+                        multiProcDayFlipRatios(end+1) = flipRatio;
+                    end
+                end
+                validFlipRatios = multiProcDayFlipRatios;
+            else
+                % Fallback: cannot calculate proper ratios without case counts
+                validFlipRatios = [];
+            end
+            
+            if ~isempty(validFlipRatios)
+                % Store the daily flip ratio array for further analysis (only multi-procedure days)
+                opMetrics.dailyFlipRatios = validFlipRatios * 100; % Convert to percentage
+                
+                % Calculate comprehensive flip ratio statistics
+                opMetrics.medianFlipToTurnoverRatio = median(validFlipRatios) * 100;
+                opMetrics.stdFlipToTurnoverRatio = std(validFlipRatios) * 100;
+                opMetrics.p25FlipToTurnoverRatio = prctile(validFlipRatios, 25) * 100;
+                opMetrics.p75FlipToTurnoverRatio = prctile(validFlipRatios, 75) * 100;
+                opMetrics.p90FlipToTurnoverRatio = prctile(validFlipRatios, 90) * 100;
+                opMetrics.minFlipToTurnoverRatio = min(validFlipRatios) * 100;
+                opMetrics.maxFlipToTurnoverRatio = max(validFlipRatios) * 100;
+                
+                if isnan(opMetrics.avgFlipToTurnoverRatio)
+                    opMetrics.avgFlipToTurnoverRatio = mean(validFlipRatios) * 100;
+                end
+            else
+                opMetrics.dailyFlipRatios = [];
+                opMetrics.medianFlipToTurnoverRatio = opMetrics.avgFlipToTurnoverRatio;
+                opMetrics.stdFlipToTurnoverRatio = NaN;
+                opMetrics.p25FlipToTurnoverRatio = NaN;
+                opMetrics.p75FlipToTurnoverRatio = NaN;
+                opMetrics.p90FlipToTurnoverRatio = NaN;
+                opMetrics.minFlipToTurnoverRatio = NaN;
+                opMetrics.maxFlipToTurnoverRatio = NaN;
+            end
+        else
+            opMetrics.dailyFlipRatios = [];
+            opMetrics.medianFlipToTurnoverRatio = opMetrics.avgFlipToTurnoverRatio;
+            opMetrics.stdFlipToTurnoverRatio = NaN;
+            opMetrics.p25FlipToTurnoverRatio = NaN;
+            opMetrics.p75FlipToTurnoverRatio = NaN;
+            opMetrics.p90FlipToTurnoverRatio = NaN;
+            opMetrics.minFlipToTurnoverRatio = NaN;
+            opMetrics.maxFlipToTurnoverRatio = NaN;
+        end
+    else
+        opMetrics.avgIdleTimePerDay = NaN;
+        opMetrics.medianIdleTimePerDay = NaN;
+        opMetrics.stdIdleTimePerDay = NaN;
+        opMetrics.p25IdleTimePerDay = NaN;
+        opMetrics.p75IdleTimePerDay = NaN;
+        opMetrics.p90IdleTimePerDay = NaN;
+        opMetrics.minIdleTimePerDay = NaN;
+        opMetrics.maxIdleTimePerDay = NaN;
+        opMetrics.dailyIdleTimes = [];
+        
+        opMetrics.avgFlipToTurnoverRatio = NaN;
+        opMetrics.medianFlipToTurnoverRatio = NaN;
+        opMetrics.stdFlipToTurnoverRatio = NaN;
+        opMetrics.p25FlipToTurnoverRatio = NaN;
+        opMetrics.p75FlipToTurnoverRatio = NaN;
+        opMetrics.p90FlipToTurnoverRatio = NaN;
+        opMetrics.minFlipToTurnoverRatio = NaN;
+        opMetrics.maxFlipToTurnoverRatio = NaN;
+        opMetrics.dailyFlipRatios = [];
+    end
+    
+    %% CALCULATED EFFICIENCY METRICS
+    % Cases per hour (assuming 8-hour work day)
+    if opMetrics.avgCasesPerDay > 0
+        opMetrics.avgCasesPerHour = opMetrics.avgCasesPerDay / 8;
+    else
+        opMetrics.avgCasesPerHour = 0;
+    end
+    
+    % Utilization rate estimate
+    totalMinutesPerDay = 8 * 60; % 480 minutes
+    if ~isnan(opMetrics.avgIdleTimePerDay) && opMetrics.avgIdleTimePerDay >= 0
+        opMetrics.utilizationRate = (totalMinutesPerDay - opMetrics.avgIdleTimePerDay) / totalMinutesPerDay;
+        opMetrics.utilizationRate = max(0, min(1, opMetrics.utilizationRate)); % Clamp between 0 and 1
+    else
+        opMetrics.utilizationRate = NaN;
+    end
+    
+    % Work time estimates
+    if ~isnan(opMetrics.avgIdleTimePerDay)
+        opMetrics.avgWorkTimePerDay = totalMinutesPerDay - opMetrics.avgIdleTimePerDay;
+        opMetrics.medianWorkTimePerDay = opMetrics.avgWorkTimePerDay; % Estimate
+    else
+        opMetrics.avgWorkTimePerDay = NaN;
+        opMetrics.medianWorkTimePerDay = NaN;
+    end
+    
+    % Calculate idle time per turnover metrics (key efficiency metric)
+    if opMetrics.multiProcedureDays > 0 && ~isnan(opMetrics.avgIdleTimePerDay) && ~isnan(opMetrics.medianIdleTimePerDay)
+        % Calculate average turnovers per multi-procedure day
+        avgCasesPerMultiProcDay = 0;
+        if length(dailyCaseCounts) > 0
+            multiProcDayCounts = dailyCaseCounts(dailyCaseCounts > 1);
+            if ~isempty(multiProcDayCounts)
+                avgCasesPerMultiProcDay = mean(multiProcDayCounts);
+            end
+        end
+        
+        if avgCasesPerMultiProcDay > 1
+            % Initialize with NaN - will be properly calculated from daily data if available
+            opMetrics.avgIdleTimePerTurnover = NaN;
+            opMetrics.medianIdleTimePerTurnover = NaN;
+            
+            % Calculate comprehensive idle time per turnover statistics if daily data is available
+            if ~isempty(opMetrics.dailyIdleTimes) && length(opMetrics.dailyIdleTimes) == length(dailyCaseCounts)
+                % Calculate daily idle time per turnover for multi-procedure days
+                dailyIdlePerTurnover = [];
+                for d = 1:length(dailyCaseCounts)
+                    if dailyCaseCounts(d) > 1 && ~isnan(opMetrics.dailyIdleTimes(d))
+                        turnovers = dailyCaseCounts(d) - 1;
+                        if turnovers > 0
+                            dailyIdlePerTurnover(end+1) = opMetrics.dailyIdleTimes(d) / turnovers;
+                        end
+                    end
+                end
+                
+                if ~isempty(dailyIdlePerTurnover)
+                    opMetrics.dailyIdleTimePerTurnover = dailyIdlePerTurnover;
+                    opMetrics.stdIdleTimePerTurnover = std(dailyIdlePerTurnover);
+                    opMetrics.p25IdleTimePerTurnover = prctile(dailyIdlePerTurnover, 25);
+                    opMetrics.p75IdleTimePerTurnover = prctile(dailyIdlePerTurnover, 75);
+                    opMetrics.p90IdleTimePerTurnover = prctile(dailyIdlePerTurnover, 90);
+                    opMetrics.minIdleTimePerTurnover = min(dailyIdlePerTurnover);
+                    opMetrics.maxIdleTimePerTurnover = max(dailyIdlePerTurnover);
+                    
+                    % Recalculate means from daily data for accuracy
+                    opMetrics.avgIdleTimePerTurnover = mean(dailyIdlePerTurnover);
+                    opMetrics.medianIdleTimePerTurnover = median(dailyIdlePerTurnover);
+                else
+                    opMetrics.dailyIdleTimePerTurnover = [];
+                    opMetrics.stdIdleTimePerTurnover = NaN;
+                    opMetrics.p25IdleTimePerTurnover = NaN;
+                    opMetrics.p75IdleTimePerTurnover = NaN;
+                    opMetrics.p90IdleTimePerTurnover = NaN;
+                    opMetrics.minIdleTimePerTurnover = NaN;
+                    opMetrics.maxIdleTimePerTurnover = NaN;
+                end
+            else
+                opMetrics.dailyIdleTimePerTurnover = [];
+                opMetrics.stdIdleTimePerTurnover = NaN;
+                opMetrics.p25IdleTimePerTurnover = NaN;
+                opMetrics.p75IdleTimePerTurnover = NaN;
+                opMetrics.p90IdleTimePerTurnover = NaN;
+                opMetrics.minIdleTimePerTurnover = NaN;
+                opMetrics.maxIdleTimePerTurnover = NaN;
+            end
+        else
+            opMetrics.avgIdleTimePerTurnover = NaN;
+            opMetrics.medianIdleTimePerTurnover = NaN;
+            opMetrics.dailyIdleTimePerTurnover = [];
+            opMetrics.stdIdleTimePerTurnover = NaN;
+            opMetrics.p25IdleTimePerTurnover = NaN;
+            opMetrics.p75IdleTimePerTurnover = NaN;
+            opMetrics.p90IdleTimePerTurnover = NaN;
+            opMetrics.minIdleTimePerTurnover = NaN;
+            opMetrics.maxIdleTimePerTurnover = NaN;
+        end
+    else
+        opMetrics.avgIdleTimePerTurnover = NaN;
+        opMetrics.medianIdleTimePerTurnover = NaN;
+        opMetrics.dailyIdleTimePerTurnover = [];
+        opMetrics.stdIdleTimePerTurnover = NaN;
+        opMetrics.p25IdleTimePerTurnover = NaN;
+        opMetrics.p75IdleTimePerTurnover = NaN;
+        opMetrics.p90IdleTimePerTurnover = NaN;
+        opMetrics.minIdleTimePerTurnover = NaN;
+        opMetrics.maxIdleTimePerTurnover = NaN;
+    end
+    
+    % Set other metrics to defaults (not available from current data)
+    opMetrics.avgOvertimePerDay = 0; % Would need schedule times to calculate
+    opMetrics.medianOvertimePerDay = 0;
+    opMetrics.stdOvertimePerDay = 0;
+    opMetrics.daysWithOvertime = 0;
+    opMetrics.daysWithOvertimePct = 0;
+    
+    % Store the operator metrics
+    comprehensiveMetrics.(safeOpName) = opMetrics;
+end
+
+if showStats
+    fprintf('  Comprehensive metrics created for %d operators\n', length(fieldnames(comprehensiveMetrics)));
+    fprintf('  Each operator has detailed procedure-specific metrics and case mix analysis\n');
+end
+
 end

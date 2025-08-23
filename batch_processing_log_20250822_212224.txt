@@ -1,0 +1,38 @@
+=================================================================
+EP Lab Batch Processing Log
+Generated: 2025-08-22 21:22:24
+=================================================================
+
+SCRIPT VERSIONS:
+================
+batchProcessHistoricalCases   : 2.1.0
+scheduleHistoricalCases       : 2.1.0
+analyzeHistoricalData         : 2.1.0
+plotAnalysisResults           : 2.1.0
+getCasesByDate                : 2.1.0
+visualizeSchedule             : 2.1.0
+MATLAB_Version                : Unknown (Index exceeds the number of array elements. Index must not exceed 5.)
+Computer_Architecture         : MACA64
+
+PROCESSING PARAMETERS:
+=====================
+Data Source:           variable
+Turnover Time:         15 minutes
+Case Filter:           all
+Prioritize Outpatient: true
+Debug Mode:            false
+Limited Days:          No limit
+
+PROCESSING RESULTS:
+==================
+Total Processing Time: 16.93 seconds
+Processed Dates:       1
+Successful Days:       1
+Failed Days:           0
+Days Processed:        1
+Avg Cases per Day:     17.0
+Avg Makespan:          0.2 hours
+Avg Lab Utilization:   49.6%
+
+Log completed: 2025-08-22 21:22:41
+=================================================================

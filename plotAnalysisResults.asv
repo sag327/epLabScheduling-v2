@@ -1,0 +1,193 @@
+function plotAnalysisResults(analysisResults)
+% Create subplots showing operator performance metrics from multi-procedure days
+% Input: analysisResults - structure returned by analyzeHistoricalData
+
+if ~isfield(analysisResults, 'operatorAnalysis') || ...
+   ~isfield(analysisResults.operatorAnalysis, 'multiProcedureDayAverages')
+    error('Analysis results must contain multi-procedure day averages');
+end
+
+if ~isfield(analysisResults, 'procedureTimeByOperator')
+    error('Analysis results must contain procedureTimeByOperator for atrial fibrillation ablation analysis');
+end
+
+averages = analysisResults.operatorAnalysis.multiProcedureDayAverages;
+caseStats = analysisResults.operatorAnalysis.caseStats;
+operatorNames = keys(averages);
+
+% Extract metrics for operators with multi-procedure days
+avgFlips = [];
+avgIdleTimes = [];
+avgCasesPerMultiProcDay = [];
+flipsPerCaseRatio = [];
+flipsPerTurnoverRatio = [];
+idleTimeToTurnoverRatio = [];
+procedureTimeStd = [];
+validOperators = {};
+
+for i = 1:length(operatorNames)
+    opName = operatorNames{i};
+    opData = averages(opName);
+    opCaseArray = caseStats(opName);
+    
+    % Only include operators with valid multi-procedure day data
+    if ~isnan(opData.avgFlips) && ~isnan(opData.avgIdleTime) && opData.multiProcedureDays > 0
+        % Find multi-procedure days (>1 case) and calculate average cases per such day
+        multiProcDayMask = opCaseArray > 1;
+        multiProcCases = opCaseArray(multiProcDayMask);
+        validMultiProcCases = multiProcCases(~isnan(multiProcCases));
+        
+        % Get atrial fibrillation ablation procedure time standard deviation for this operator
+        opFieldName = matlab.lang.makeValidName(opName);
+        atrialFibStd = NaN;
+        
+        if isfield(analysisResults, 'procedureTimeByOperator') && isfield(analysisResults.procedureTimeByOperator, opFieldName)
+            opProcData = analysisResults.procedureTimeByOperator.(opFieldName);
+            
+            % Look for atrial fibrillation ablation procedures
+            procFields = fieldnames(opProcData);
+            procFields = procFields(~strcmp(procFields, 'operatorName') & ~strcmp(procFields, 'totalCases'));
+            
+            for j = 1:length(procFields)
+                procField = procFields{j};
+                if isfield(opProcData, procField)
+                    procInfo = opProcData.(procField);
+                    if isfield(procInfo, 'procedureName')
+                        procName = lower(procInfo.procedureName);
+                        % Check if this is an atrial fibrillation ablation procedure
+                        % Look for various possible naming patterns
+                        isAtrialFib = (contains(procName, 'atrial') && contains(procName, 'fib')) || ...
+                                     contains(procName, 'af') || contains(procName, 'a-fib') || ...
+                                     contains(procName, 'afib');
+                        isAblation = contains(procName, 'ablation') || contains(procName, 'ablate');
+                        
+                        if isAtrialFib && isAblation
+                            if isfield(procInfo, 'procedureTime') && procInfo.procedureTime.validCount > 0
+                                atrialFibStd = procInfo.procedureTime.std;
+                                atrialFibDuration = pro
+                                break; % Use the first matching procedure found
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        if ~isempty(validMultiProcCases) && ~isnan(atrialFibStd)
+            avgCasesThisOp = mean(validMultiProcCases);
+            avgTurnOversThisOp = avgCasesThisOp - 1;
+            avgFlipsThisOp = opData.avgFlips;
+            avgIdleTimeThisOp = opData.avgIdleTime;
+            
+            avgFlips = [avgFlips, avgFlipsThisOp];
+            avgIdleTimes = [avgIdleTimes, avgIdleTimeThisOp];
+            avgCasesPerMultiProcDay = [avgCasesPerMultiProcDay, avgCasesThisOp];
+            flipsPerCaseRatio = [flipsPerCaseRatio, avgFlipsThisOp / avgCasesThisOp];
+            flipsPerTurnoverRatio = [flipsPerTurnoverRatio, avgFlipsThisOp / avgTurnOversThisOp];
+            idleTimeToTurnoverRatio = [idleTimeToTurnoverRatio, avgIdleTimeThisOp / avgTurnOversThisOp];
+            procedureTimeStd = [procedureTimeStd, atrialFibStd];
+            validOperators{end+1} = opName;
+        end
+    end
+end
+
+if isempty(avgFlips)
+    fprintf('No operators with valid multi-procedure day data and atrial fibrillation ablation procedures found\n');
+    return;
+end
+
+fprintf('Found %d operators with atrial fibrillation ablation data and multi-procedure days\n', length(validOperators));
+
+% Sort operators by average flips (descending) for consistent ordering
+[~, sortIdx] = sort(avgFlips, 'descend');
+avgFlips = avgFlips(sortIdx);
+avgIdleTimes = avgIdleTimes(sortIdx);
+avgCasesPerMultiProcDay = avgCasesPerMultiProcDay(sortIdx);
+flipsPerCaseRatio = flipsPerCaseRatio(sortIdx);
+flipsPerTurnoverRatio = flipsPerTurnoverRatio(sortIdx);
+idleTimeToTurnoverRatio = idleTimeToTurnoverRatio(sortIdx);
+procedureTimeStd = procedureTimeStd(sortIdx);
+validOperators = validOperators(sortIdx);
+
+flipsPerTurnoverRatio = flipsPerTurnoverRatio .* 100;
+
+% Create first figure: Proportion of Turnovers that are Flips
+figure('Position', [100, 100, 1400, 1000]);
+
+bar(validOperators, flipsPerTurnoverRatio);
+set(gca, 'XTickLabel', validOperators);
+xtickangle(45);
+xlabel('Operator');
+ylabel('% of Turnovers');
+title('Proportion of Turnovers that are Flips by Operator (Multi-Procedure Days Only)');
+grid on;
+% Add value labels
+for i = 1:length(flipsPerTurnoverRatio)
+    text(i, flipsPerTurnoverRatio(i) + 0.01, sprintf('%.1f', flipsPerTurnoverRatio(i)), ...
+         'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
+end
+
+% Create second figure: Average Idle Time to Average Number of Turnovers Ratio
+figure('Position', [200, 200, 1400, 1000]);
+
+bar(validOperators, idleTimeToTurnoverRatio);
+set(gca, 'XTickLabel', validOperators);
+xtickangle(45);
+xlabel('Operator');
+ylabel('Idle Time per Turnover (minutes)');
+title('Average Idle Time per Turnover by Operator (Multi-Procedure Days Only)');
+grid on;
+% Add value labels
+for i = 1:length(idleTimeToTurnoverRatio)
+    text(i, idleTimeToTurnoverRatio(i) + max(idleTimeToTurnoverRatio)*0.01, sprintf('%.1f', idleTimeToTurnoverRatio(i)), ...
+         'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
+end
+
+% Create third figure: Correlation between Atrial Fibrillation Ablation Std Dev and Flip to Turnover Ratio
+figure('Position', [300, 300, 1400, 1000]);
+
+% Create scatter plot
+scatter(procedureTimeStd, flipsPerTurnoverRatio, 100, 'filled');
+hold on;
+
+% Add operator labels next to points
+for i = 1:length(validOperators)
+    text(procedureTimeStd(i) + max(procedureTimeStd)*0.01, flipsPerTurnoverRatio(i), validOperators{i}, ...
+         'FontSize', 8, 'HorizontalAlignment', 'left');
+end
+
+% Calculate and display correlation
+if length(procedureTimeStd) > 2
+    correlationCoeff = corrcoef(procedureTimeStd, flipsPerTurnoverRatio);
+    rValue = correlationCoeff(1,2);
+    
+    % Add trend line
+    p = polyfit(procedureTimeStd, flipsPerTurnoverRatio, 1);
+    xTrend = linspace(min(procedureTimeStd), max(procedureTimeStd), 100);
+    yTrend = polyval(p, xTrend);
+    plot(xTrend, yTrend, 'r--', 'LineWidth', 2);
+    
+    % Add correlation information to title
+    title(sprintf('Atrial Fibrillation Ablation Std Dev vs Flip-to-Turnover Ratio (r = %.3f)', rValue));
+    
+    % Display correlation in console
+    fprintf('Correlation between atrial fibrillation ablation std dev and flip-to-turnover ratio: r = %.3f\n', rValue);
+    if abs(rValue) > 0.5
+        fprintf('Strong correlation detected!\n');
+    elseif abs(rValue) > 0.3
+        fprintf('Moderate correlation detected.\n');
+    else
+        fprintf('Weak correlation.\n');
+    end
+else
+    title('Atrial Fibrillation Ablation Std Dev vs Flip-to-Turnover Ratio');
+    fprintf('Not enough data points for correlation analysis\n');
+end
+
+xlabel('Atrial Fibrillation Ablation Std Dev (minutes)');
+ylabel('% of Turnovers that are Flips');
+grid on;
+hold off;
+
+fprintf('Charts created with %d operators\n', length(validOperators));
+end

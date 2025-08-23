@@ -1,0 +1,98 @@
+EP Lab Statistical Dataset - Variable Descriptions
+=================================================
+
+OperatorName                            : Name/identifier of the operator
+OperatorID                              : Numeric ID for the operator
+TotalWorkingDays                        : Total number of working days in dataset
+TotalCases                              : Total number of cases performed
+AvgCasesPerDay                          : Average number of cases per working day
+MedianCasesPerDay                       : Median number of cases per working day
+StdCasesPerDay                          : Standard deviation of cases per day
+AvgIdleTimePerDay                       : Average idle time per day (minutes)
+MedianIdleTimePerDay                    : Median idle time per day (minutes)
+StdIdleTimePerDay                       : Standard deviation of idle time per day (minutes)
+P25IdleTimePerDay                       : 25th percentile of idle time per day (minutes)
+P75IdleTimePerDay                       : 75th percentile of idle time per day (minutes)
+P90IdleTimePerDay                       : 90th percentile of idle time per day (minutes)
+MinIdleTimePerDay                       : Minimum idle time per day (minutes)
+MaxIdleTimePerDay                       : Maximum idle time per day (minutes)
+AvgOvertimePerDay                       : Average overtime per day (minutes)
+MedianOvertimePerDay                    : Median overtime per day (minutes)
+StdOvertimePerDay                       : Standard deviation of overtime per day
+AvgWorkTimePerDay                       : Average total work time per day (minutes)
+MedianWorkTimePerDay                    : Median total work time per day (minutes)
+AvgFlipToTurnoverRatio                  : Average flip-to-turnover ratio (%)
+MedianFlipToTurnoverRatio               : Median flip-to-turnover ratio (%)
+StdFlipToTurnoverRatio                  : Standard deviation of flip-to-turnover ratio (%)
+P25FlipToTurnoverRatio                  : 25th percentile of flip-to-turnover ratio (%)
+P75FlipToTurnoverRatio                  : 75th percentile of flip-to-turnover ratio (%)
+P90FlipToTurnoverRatio                  : 90th percentile of flip-to-turnover ratio (%)
+MinFlipToTurnoverRatio                  : Minimum flip-to-turnover ratio (%)
+MaxFlipToTurnoverRatio                  : Maximum flip-to-turnover ratio (%)
+AvgCasesPerHour                         : Average cases processed per hour
+UtilizationRate                         : Overall utilization rate (0-1)
+AvgIdleTimePerTurnover                  : Average idle time per case turnover (minutes) - key efficiency metric
+MedianIdleTimePerTurnover               : Median idle time per case turnover (minutes) - key efficiency metric
+StdIdleTimePerTurnover                  : Standard deviation of idle time per turnover (minutes)
+P25IdleTimePerTurnover                  : 25th percentile of idle time per turnover (minutes)
+P75IdleTimePerTurnover                  : 75th percentile of idle time per turnover (minutes)
+P90IdleTimePerTurnover                  : 90th percentile of idle time per turnover (minutes)
+MinIdleTimePerTurnover                  : Minimum idle time per turnover (minutes)
+MaxIdleTimePerTurnover                  : Maximum idle time per turnover (minutes)
+MultiProcedureDays                      : Number of days with multiple procedures
+MultiProcedureDaysPct                   : Percentage of days with multiple procedures
+DaysWithOvertime                        : Number of days with overtime
+DaysWithOvertimePct                     : Percentage of days with overtime
+InpatientCases                          : Number of inpatient cases
+OutpatientCases                         : Number of outpatient cases
+InpatientProportion                     : Proportion of cases that are inpatient (0-1)
+OutpatientProportion                    : Proportion of cases that are outpatient (0-1)
+UniqueProcedureTypes                    : Number of unique procedure types performed
+ProcedureDiversityIndex                 : Shannon diversity index for procedure types
+Proc_procedures_Count                   : Number of procedures procedures
+Proc_procedures_Proportion              : Proportion of cases that are procedures
+Proc_procedures_AvgDuration             : Average duration for procedures (minutes)
+Proc_procedures_MedianDuration          : Median duration for procedures (minutes)
+Proc_procedures_StdDuration             : Std deviation of duration for procedures
+Proc_procedures_AvgSetup                : Average setup time for procedures (minutes)
+Proc_procedures_MedianSetup             : Median setup time for procedures (minutes)
+Proc_procedures_AvgPost                 : Average post time for procedures (minutes)
+Proc_procedures_MedianPost              : Median post time for procedures (minutes)
+Proc_counts_Count                       : Number of counts procedures
+Proc_counts_Proportion                  : Proportion of cases that are counts
+Proc_counts_AvgDuration                 : Average duration for counts (minutes)
+Proc_counts_MedianDuration              : Median duration for counts (minutes)
+Proc_counts_StdDuration                 : Std deviation of duration for counts
+Proc_counts_AvgSetup                    : Average setup time for counts (minutes)
+Proc_counts_MedianSetup                 : Median setup time for counts (minutes)
+Proc_counts_AvgPost                     : Average post time for counts (minutes)
+Proc_counts_MedianPost                  : Median post time for counts (minutes)
+Proc_percentages_Count                  : Number of percentages procedures
+Proc_percentages_Proportion             : Proportion of cases that are percentages
+Proc_percentages_AvgDuration            : Average duration for percentages (minutes)
+Proc_percentages_MedianDuration         : Median duration for percentages (minutes)
+Proc_percentages_StdDuration            : Std deviation of duration for percentages
+Proc_percentages_AvgSetup               : Average setup time for percentages (minutes)
+Proc_percentages_MedianSetup            : Median setup time for percentages (minutes)
+Proc_percentages_AvgPost                : Average post time for percentages (minutes)
+Proc_percentages_MedianPost             : Median post time for percentages (minutes)
+Proc_countsStd_Count                    : Number of countsStd procedures
+Proc_countsStd_Proportion               : Proportion of cases that are countsStd
+Proc_countsStd_AvgDuration              : Average duration for countsStd (minutes)
+Proc_countsStd_MedianDuration           : Median duration for countsStd (minutes)
+Proc_countsStd_StdDuration              : Std deviation of duration for countsStd
+Proc_countsStd_AvgSetup                 : Average setup time for countsStd (minutes)
+Proc_countsStd_MedianSetup              : Median setup time for countsStd (minutes)
+Proc_countsStd_AvgPost                  : Average post time for countsStd (minutes)
+Proc_countsStd_MedianPost               : Median post time for countsStd (minutes)
+Proc_percentagesStd_Count               : Number of percentagesStd procedures
+Proc_percentagesStd_Proportion          : Proportion of cases that are percentagesStd
+Proc_percentagesStd_AvgDuration         : Average duration for percentagesStd (minutes)
+Proc_percentagesStd_MedianDuration      : Median duration for percentagesStd (minutes)
+Proc_percentagesStd_StdDuration         : Std deviation of duration for percentagesStd
+Proc_percentagesStd_AvgSetup            : Average setup time for percentagesStd (minutes)
+Proc_percentagesStd_MedianSetup         : Median setup time for percentagesStd (minutes)
+Proc_percentagesStd_AvgPost             : Average post time for percentagesStd (minutes)
+Proc_percentagesStd_MedianPost          : Median post time for percentagesStd (minutes)
+
+Generated: 22-Aug-2025 16:50:11

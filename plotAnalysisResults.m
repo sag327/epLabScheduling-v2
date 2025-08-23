@@ -51,7 +51,27 @@ for i = 1:length(operatorNames)
         avgCasesPerMultiProcDay = [avgCasesPerMultiProcDay, avgCasesThisOp];
         flipsPerCaseRatio = [flipsPerCaseRatio, avgFlipsThisOp / avgCasesThisOp];
         flipsPerTurnoverRatio = [flipsPerTurnoverRatio, flipToTurnoverRatioThisOp];
-        medianIdleTimeToTurnoverRatio = [medianIdleTimeToTurnoverRatio, medianIdleTimeThisOp / avgTurnOversThisOp];
+        % ONLY use the correctly calculated medianIdleTimePerTurnover from comprehensive metrics
+        % No fallback calculations - if comprehensive data not available, skip this operator
+        if isfield(analysisResults, 'comprehensiveOperatorMetrics')
+            safeOpName = matlab.lang.makeValidName(opName);
+            if isfield(analysisResults.comprehensiveOperatorMetrics, safeOpName)
+                compMetrics = analysisResults.comprehensiveOperatorMetrics.(safeOpName);
+                if isfield(compMetrics, 'medianIdleTimePerTurnover') && ~isnan(compMetrics.medianIdleTimePerTurnover)
+                    medianIdleTimeToTurnoverRatio = [medianIdleTimeToTurnoverRatio, compMetrics.medianIdleTimePerTurnover];
+                else
+                    % Skip operator if no valid comprehensive data - do not use fallback calculation
+                    continue;
+                end
+            else
+                % Skip operator if not in comprehensive metrics
+                continue;
+            end
+        else
+            % Skip all operators if comprehensive metrics not available
+            warning('Comprehensive metrics not available - cannot plot idle time per turnover');
+            break;
+        end
         validOperators{end+1} = opName;
         
     end
