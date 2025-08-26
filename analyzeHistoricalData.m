@@ -2038,17 +2038,17 @@ for i = 1:numOperators
             validDurations = procDurations(~isnan(procDurations) & procDurations > 0);
             
             if ~isempty(validDurations)
-                opMetrics.(['proc_' safeProcName '_count']) = length(validDurations);
-                opMetrics.(['proc_' safeProcName '_proportion']) = length(validDurations) / opMetrics.totalCases;
-                opMetrics.(['proc_' safeProcName '_avgDuration']) = mean(validDurations);
-                opMetrics.(['proc_' safeProcName '_medianDuration']) = median(validDurations);
-                opMetrics.(['proc_' safeProcName '_stdDuration']) = std(validDurations);
+                opMetrics.(['proc_' safeProcName '_Count']) = length(validDurations);
+                opMetrics.(['proc_' safeProcName '_Proportion']) = length(validDurations) / opMetrics.totalCases;
+                opMetrics.(['proc_' safeProcName '_AvgDuration']) = mean(validDurations);
+                opMetrics.(['proc_' safeProcName '_MedianDuration']) = median(validDurations);
+                opMetrics.(['proc_' safeProcName '_StdDuration']) = std(validDurations);
             else
-                opMetrics.(['proc_' safeProcName '_count']) = 0;
-                opMetrics.(['proc_' safeProcName '_proportion']) = 0;
-                opMetrics.(['proc_' safeProcName '_avgDuration']) = NaN;
-                opMetrics.(['proc_' safeProcName '_medianDuration']) = NaN;
-                opMetrics.(['proc_' safeProcName '_stdDuration']) = NaN;
+                opMetrics.(['proc_' safeProcName '_Count']) = 0;
+                opMetrics.(['proc_' safeProcName '_Proportion']) = 0;
+                opMetrics.(['proc_' safeProcName '_AvgDuration']) = NaN;
+                opMetrics.(['proc_' safeProcName '_MedianDuration']) = NaN;
+                opMetrics.(['proc_' safeProcName '_StdDuration']) = NaN;
             end
             
             % Setup time metrics for this procedure type
@@ -2056,11 +2056,11 @@ for i = 1:numOperators
             validSetupTimes = procSetupTimes(~isnan(procSetupTimes) & procSetupTimes > 0);
             
             if ~isempty(validSetupTimes)
-                opMetrics.(['proc_' safeProcName '_avgSetup']) = mean(validSetupTimes);
-                opMetrics.(['proc_' safeProcName '_medianSetup']) = median(validSetupTimes);
+                opMetrics.(['proc_' safeProcName '_AvgSetup']) = mean(validSetupTimes);
+                opMetrics.(['proc_' safeProcName '_MedianSetup']) = median(validSetupTimes);
             else
-                opMetrics.(['proc_' safeProcName '_avgSetup']) = NaN;
-                opMetrics.(['proc_' safeProcName '_medianSetup']) = NaN;
+                opMetrics.(['proc_' safeProcName '_AvgSetup']) = NaN;
+                opMetrics.(['proc_' safeProcName '_MedianSetup']) = NaN;
             end
             
             % Post time metrics for this procedure type
@@ -2068,11 +2068,11 @@ for i = 1:numOperators
             validPostTimes = procPostTimes(~isnan(procPostTimes) & procPostTimes > 0);
             
             if ~isempty(validPostTimes)
-                opMetrics.(['proc_' safeProcName '_avgPost']) = mean(validPostTimes);
-                opMetrics.(['proc_' safeProcName '_medianPost']) = median(validPostTimes);
+                opMetrics.(['proc_' safeProcName '_AvgPost']) = mean(validPostTimes);
+                opMetrics.(['proc_' safeProcName '_MedianPost']) = median(validPostTimes);
             else
-                opMetrics.(['proc_' safeProcName '_avgPost']) = NaN;
-                opMetrics.(['proc_' safeProcName '_medianPost']) = NaN;
+                opMetrics.(['proc_' safeProcName '_AvgPost']) = NaN;
+                opMetrics.(['proc_' safeProcName '_MedianPost']) = NaN;
             end
         end
     else

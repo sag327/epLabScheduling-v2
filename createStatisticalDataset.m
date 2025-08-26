@@ -1,12 +1,13 @@
 function statisticalData = createStatisticalDataset(analysisResults, varargin)
 % Create a comprehensive statistical dataset for predictive modeling
-% Version: 2.1.0
+% Version: 3.0.0
 %
-% This function consolidates all available metrics into a structured format
-% suitable for statistical analysis, regression modeling, and machine learning
+% This function consolidates comprehensive operator metrics into a structured format
+% suitable for statistical analysis, regression modeling, and machine learning.
+% REQUIRES comprehensive metrics from analyzeHistoricalData.m (no fallback support).
 %
 % Inputs:
-%   analysisResults - Results structure from analyzeHistoricalData.m (enhanced with comprehensive metrics)
+%   analysisResults - Results structure from analyzeHistoricalData.m with comprehensiveOperatorMetrics
 %
 % Optional Parameters:
 %   'ExportToCSV' - Export to CSV file (default: false)
@@ -66,28 +67,13 @@ if isfield(analysisResults, 'comprehensiveOperatorMetrics') && ~isempty(analysis
     % Use the enhanced comprehensive metrics
     comprehensiveMetrics = analysisResults.comprehensiveOperatorMetrics;
     operatorNames = fieldnames(comprehensiveMetrics);
-    useComprehensive = true;
     
     if verbose
-        fprintf('Using comprehensive operator metrics from enhanced analysis\n');
+    fprintf('Using comprehensive operator metrics from enhanced analysis\n');
     end
     
-elseif isfield(analysisResults, 'operatorAnalysis') && ~isempty(analysisResults.operatorAnalysis)
-    % Fall back to basic operator analysis
-    operatorAnalysis = analysisResults.operatorAnalysis;
-    
-    if isfield(operatorAnalysis, 'multiProcedureDayAverages') && ~isempty(operatorAnalysis.multiProcedureDayAverages)
-        operatorNames = keys(operatorAnalysis.multiProcedureDayAverages);
-        useComprehensive = false;
-        
-        if verbose
-            fprintf('Using basic operator analysis (comprehensive metrics not available)\n');
-        end
-    else
-        error('operatorAnalysis must contain multiProcedureDayAverages field');
-    end
 else
-    error('analysisResults must contain either comprehensiveOperatorMetrics or operatorAnalysis field from analyzeHistoricalData.m');
+    error('analysisResults must contain comprehensiveOperatorMetrics. Run analyzeHistoricalData.m to generate comprehensive metrics.');
 end
 
 numOperators = length(operatorNames);
@@ -217,304 +203,118 @@ for i = 1:numOperators
     opName = operatorNames{i};
     
     if verbose
-        fprintf('  %s (%d/%d)\n', opName, i, numOperators);
+    fprintf('  %s (%d/%d)\n', opName, i, numOperators);
     end
     
     % Basic identifiers
     data.OperatorName{i} = opName;
     
-    if useComprehensive
-        %% EXTRACT FROM COMPREHENSIVE METRICS
-        opMetrics = comprehensiveMetrics.(opName);
+    %% EXTRACT FROM COMPREHENSIVE METRICS
+    opMetrics = comprehensiveMetrics.(opName);
+    
+    % Basic working pattern metrics
+    data.TotalCases(i) = getField(opMetrics, 'totalCases', 0);
+    data.TotalWorkingDays(i) = getField(opMetrics, 'workingDays', 0);
+    data.AvgCasesPerDay(i) = getField(opMetrics, 'avgCasesPerDay', 0);
+    data.MedianCasesPerDay(i) = getField(opMetrics, 'medianCasesPerDay', 0);
+    data.StdCasesPerDay(i) = getField(opMetrics, 'stdCasesPerDay', 0);
+    
+    % Time-based performance metrics
+    data.AvgIdleTimePerDay(i) = getField(opMetrics, 'avgIdleTimePerDay', NaN);
+    data.MedianIdleTimePerDay(i) = getField(opMetrics, 'medianIdleTimePerDay', NaN);
+    data.StdIdleTimePerDay(i) = getField(opMetrics, 'stdIdleTimePerDay', NaN);
+    data.P25IdleTimePerDay(i) = getField(opMetrics, 'p25IdleTimePerDay', NaN);
+    data.P75IdleTimePerDay(i) = getField(opMetrics, 'p75IdleTimePerDay', NaN);
+    data.P90IdleTimePerDay(i) = getField(opMetrics, 'p90IdleTimePerDay', NaN);
+    data.MinIdleTimePerDay(i) = getField(opMetrics, 'minIdleTimePerDay', NaN);
+    data.MaxIdleTimePerDay(i) = getField(opMetrics, 'maxIdleTimePerDay', NaN);
+    data.AvgOvertimePerDay(i) = getField(opMetrics, 'avgOvertimePerDay', 0);
+    data.MedianOvertimePerDay(i) = getField(opMetrics, 'medianOvertimePerDay', 0);
+    data.StdOvertimePerDay(i) = getField(opMetrics, 'stdOvertimePerDay', 0);
+    data.AvgWorkTimePerDay(i) = getField(opMetrics, 'avgWorkTimePerDay', NaN);
+    data.MedianWorkTimePerDay(i) = getField(opMetrics, 'medianWorkTimePerDay', NaN);
+    
+    % Efficiency metrics
+    data.AvgFlipToTurnoverRatio(i) = getField(opMetrics, 'avgFlipToTurnoverRatio', NaN);
+    data.MedianFlipToTurnoverRatio(i) = getField(opMetrics, 'medianFlipToTurnoverRatio', NaN);
+    data.StdFlipToTurnoverRatio(i) = getField(opMetrics, 'stdFlipToTurnoverRatio', NaN);
+    data.P25FlipToTurnoverRatio(i) = getField(opMetrics, 'p25FlipToTurnoverRatio', NaN);
+    data.P75FlipToTurnoverRatio(i) = getField(opMetrics, 'p75FlipToTurnoverRatio', NaN);
+    data.P90FlipToTurnoverRatio(i) = getField(opMetrics, 'p90FlipToTurnoverRatio', NaN);
+    data.MinFlipToTurnoverRatio(i) = getField(opMetrics, 'minFlipToTurnoverRatio', NaN);
+    data.MaxFlipToTurnoverRatio(i) = getField(opMetrics, 'maxFlipToTurnoverRatio', NaN);
+    data.AvgCasesPerHour(i) = getField(opMetrics, 'avgCasesPerHour', 0);
+    data.UtilizationRate(i) = getField(opMetrics, 'utilizationRate', NaN);
+    
+    % Idle time per turnover metrics (key efficiency indicators)
+    data.AvgIdleTimePerTurnover(i) = getField(opMetrics, 'avgIdleTimePerTurnover', NaN);
+    data.MedianIdleTimePerTurnover(i) = getField(opMetrics, 'medianIdleTimePerTurnover', NaN);
+    data.StdIdleTimePerTurnover(i) = getField(opMetrics, 'stdIdleTimePerTurnover', NaN);
+    data.P25IdleTimePerTurnover(i) = getField(opMetrics, 'p25IdleTimePerTurnover', NaN);
+    data.P75IdleTimePerTurnover(i) = getField(opMetrics, 'p75IdleTimePerTurnover', NaN);
+    data.P90IdleTimePerTurnover(i) = getField(opMetrics, 'p90IdleTimePerTurnover', NaN);
+    data.MinIdleTimePerTurnover(i) = getField(opMetrics, 'minIdleTimePerTurnover', NaN);
+    data.MaxIdleTimePerTurnover(i) = getField(opMetrics, 'maxIdleTimePerTurnover', NaN);
+    
+    % Multi-procedure day metrics
+    data.MultiProcedureDays(i) = getField(opMetrics, 'multiProcedureDays', 0);
+    data.MultiProcedureDaysPct(i) = getField(opMetrics, 'multiProcedureDaysPct', 0);
+    data.DaysWithOvertime(i) = getField(opMetrics, 'daysWithOvertime', 0);
+    data.DaysWithOvertimePct(i) = getField(opMetrics, 'daysWithOvertimePct', 0);
+    
+    % Case mix metrics
+    data.InpatientCases(i) = getField(opMetrics, 'inpatientCases', 0);
+    data.OutpatientCases(i) = getField(opMetrics, 'outpatientCases', 0);
+    data.InpatientProportion(i) = getField(opMetrics, 'inpatientProportion', 0);
+    data.OutpatientProportion(i) = getField(opMetrics, 'outpatientProportion', 0);
+    
+    % Procedure diversity metrics
+    data.UniqueProcedureTypes(i) = getField(opMetrics, 'uniqueProcedureTypes', 0);
+    data.ProcedureDiversityIndex(i) = getField(opMetrics, 'procedureDiversityIndex', 0);
+    
+    % Overall procedure time metrics
+    data.AvgProcedureTime(i) = getField(opMetrics, 'avgProcedureTime', NaN);
+    data.MedianProcedureTime(i) = getField(opMetrics, 'medianProcedureTime', NaN);
+    data.StdProcedureTime(i) = getField(opMetrics, 'stdProcedureTime', NaN);
+    data.P25ProcedureTime(i) = getField(opMetrics, 'p25ProcedureTime', NaN);
+    data.P75ProcedureTime(i) = getField(opMetrics, 'p75ProcedureTime', NaN);
+    data.P90ProcedureTime(i) = getField(opMetrics, 'p90ProcedureTime', NaN);
+    
+    % Overall setup and post time metrics
+    data.AvgSetupTime(i) = getField(opMetrics, 'avgSetupTime', NaN);
+    data.MedianSetupTime(i) = getField(opMetrics, 'medianSetupTime', NaN);
+    data.StdSetupTime(i) = getField(opMetrics, 'stdSetupTime', NaN);
+    data.AvgPostTime(i) = getField(opMetrics, 'avgPostTime', NaN);
+    data.MedianPostTime(i) = getField(opMetrics, 'medianPostTime', NaN);
+    data.StdPostTime(i) = getField(opMetrics, 'stdPostTime', NaN);
+    
+    % Extract procedure-specific metrics dynamically
+    metricFields = fieldnames(opMetrics);
+    procSpecificFields = metricFields(startsWith(metricFields, 'proc_'));
+    
+    for f = 1:length(procSpecificFields)
+        fieldName = procSpecificFields{f};
+        % Convert to standard naming convention
+        standardName = regexprep(fieldName, '^proc_', 'Proc_');
         
-        % Basic working pattern metrics
-        data.TotalCases(i) = getField(opMetrics, 'totalCases', 0);
-        data.TotalWorkingDays(i) = getField(opMetrics, 'workingDays', 0);
-        data.AvgCasesPerDay(i) = getField(opMetrics, 'avgCasesPerDay', 0);
-        data.MedianCasesPerDay(i) = getField(opMetrics, 'medianCasesPerDay', 0);
-        data.StdCasesPerDay(i) = getField(opMetrics, 'stdCasesPerDay', 0);
-        
-        % Time-based performance metrics
-        data.AvgIdleTimePerDay(i) = getField(opMetrics, 'avgIdleTimePerDay', NaN);
-        data.MedianIdleTimePerDay(i) = getField(opMetrics, 'medianIdleTimePerDay', NaN);
-        data.StdIdleTimePerDay(i) = getField(opMetrics, 'stdIdleTimePerDay', NaN);
-        data.P25IdleTimePerDay(i) = getField(opMetrics, 'p25IdleTimePerDay', NaN);
-        data.P75IdleTimePerDay(i) = getField(opMetrics, 'p75IdleTimePerDay', NaN);
-        data.P90IdleTimePerDay(i) = getField(opMetrics, 'p90IdleTimePerDay', NaN);
-        data.MinIdleTimePerDay(i) = getField(opMetrics, 'minIdleTimePerDay', NaN);
-        data.MaxIdleTimePerDay(i) = getField(opMetrics, 'maxIdleTimePerDay', NaN);
-        data.AvgOvertimePerDay(i) = getField(opMetrics, 'avgOvertimePerDay', 0);
-        data.MedianOvertimePerDay(i) = getField(opMetrics, 'medianOvertimePerDay', 0);
-        data.StdOvertimePerDay(i) = getField(opMetrics, 'stdOvertimePerDay', 0);
-        data.AvgWorkTimePerDay(i) = getField(opMetrics, 'avgWorkTimePerDay', NaN);
-        data.MedianWorkTimePerDay(i) = getField(opMetrics, 'medianWorkTimePerDay', NaN);
-        
-        % Efficiency metrics
-        data.AvgFlipToTurnoverRatio(i) = getField(opMetrics, 'avgFlipToTurnoverRatio', NaN);
-        data.MedianFlipToTurnoverRatio(i) = getField(opMetrics, 'medianFlipToTurnoverRatio', NaN);
-        data.StdFlipToTurnoverRatio(i) = getField(opMetrics, 'stdFlipToTurnoverRatio', NaN);
-        data.P25FlipToTurnoverRatio(i) = getField(opMetrics, 'p25FlipToTurnoverRatio', NaN);
-        data.P75FlipToTurnoverRatio(i) = getField(opMetrics, 'p75FlipToTurnoverRatio', NaN);
-        data.P90FlipToTurnoverRatio(i) = getField(opMetrics, 'p90FlipToTurnoverRatio', NaN);
-        data.MinFlipToTurnoverRatio(i) = getField(opMetrics, 'minFlipToTurnoverRatio', NaN);
-        data.MaxFlipToTurnoverRatio(i) = getField(opMetrics, 'maxFlipToTurnoverRatio', NaN);
-        data.AvgCasesPerHour(i) = getField(opMetrics, 'avgCasesPerHour', 0);
-        data.UtilizationRate(i) = getField(opMetrics, 'utilizationRate', NaN);
-        
-        % Idle time per turnover metrics (key efficiency indicators)
-        data.AvgIdleTimePerTurnover(i) = getField(opMetrics, 'avgIdleTimePerTurnover', NaN);
-        data.MedianIdleTimePerTurnover(i) = getField(opMetrics, 'medianIdleTimePerTurnover', NaN);
-        data.StdIdleTimePerTurnover(i) = getField(opMetrics, 'stdIdleTimePerTurnover', NaN);
-        data.P25IdleTimePerTurnover(i) = getField(opMetrics, 'p25IdleTimePerTurnover', NaN);
-        data.P75IdleTimePerTurnover(i) = getField(opMetrics, 'p75IdleTimePerTurnover', NaN);
-        data.P90IdleTimePerTurnover(i) = getField(opMetrics, 'p90IdleTimePerTurnover', NaN);
-        data.MinIdleTimePerTurnover(i) = getField(opMetrics, 'minIdleTimePerTurnover', NaN);
-        data.MaxIdleTimePerTurnover(i) = getField(opMetrics, 'maxIdleTimePerTurnover', NaN);
-        
-        % Multi-procedure day metrics
-        data.MultiProcedureDays(i) = getField(opMetrics, 'multiProcedureDays', 0);
-        data.MultiProcedureDaysPct(i) = getField(opMetrics, 'multiProcedureDaysPct', 0);
-        data.DaysWithOvertime(i) = getField(opMetrics, 'daysWithOvertime', 0);
-        data.DaysWithOvertimePct(i) = getField(opMetrics, 'daysWithOvertimePct', 0);
-        
-        % Case mix metrics
-        data.InpatientCases(i) = getField(opMetrics, 'inpatientCases', 0);
-        data.OutpatientCases(i) = getField(opMetrics, 'outpatientCases', 0);
-        data.InpatientProportion(i) = getField(opMetrics, 'inpatientProportion', 0);
-        data.OutpatientProportion(i) = getField(opMetrics, 'outpatientProportion', 0);
-        
-        % Procedure diversity metrics
-        data.UniqueProcedureTypes(i) = getField(opMetrics, 'uniqueProcedureTypes', 0);
-        data.ProcedureDiversityIndex(i) = getField(opMetrics, 'procedureDiversityIndex', 0);
-        
-        % Overall procedure time metrics
-        data.AvgProcedureTime(i) = getField(opMetrics, 'avgProcedureTime', NaN);
-        data.MedianProcedureTime(i) = getField(opMetrics, 'medianProcedureTime', NaN);
-        data.StdProcedureTime(i) = getField(opMetrics, 'stdProcedureTime', NaN);
-        data.P25ProcedureTime(i) = getField(opMetrics, 'p25ProcedureTime', NaN);
-        data.P75ProcedureTime(i) = getField(opMetrics, 'p75ProcedureTime', NaN);
-        data.P90ProcedureTime(i) = getField(opMetrics, 'p90ProcedureTime', NaN);
-        
-        % Overall setup and post time metrics
-        data.AvgSetupTime(i) = getField(opMetrics, 'avgSetupTime', NaN);
-        data.MedianSetupTime(i) = getField(opMetrics, 'medianSetupTime', NaN);
-        data.StdSetupTime(i) = getField(opMetrics, 'stdSetupTime', NaN);
-        data.AvgPostTime(i) = getField(opMetrics, 'avgPostTime', NaN);
-        data.MedianPostTime(i) = getField(opMetrics, 'medianPostTime', NaN);
-        data.StdPostTime(i) = getField(opMetrics, 'stdPostTime', NaN);
-        
-        % Extract procedure-specific metrics dynamically
-        metricFields = fieldnames(opMetrics);
-        procSpecificFields = metricFields(startsWith(metricFields, 'proc_'));
-        
-        for f = 1:length(procSpecificFields)
-            fieldName = procSpecificFields{f};
-            % Convert to standard naming convention
-            standardName = regexprep(fieldName, '^proc_', 'Proc_');
-            
-            % Initialize field if it doesn't exist
-            if ~isfield(data, standardName)
-                data.(standardName) = NaN(numOperators, 1);
-            end
-            
-            data.(standardName)(i) = opMetrics.(fieldName);
+        % Initialize field if it doesn't exist
+        if ~isfield(data, standardName)
+            data.(standardName) = NaN(numOperators, 1);
         end
         
-    else
-        %% EXTRACT FROM BASIC OPERATOR ANALYSIS (FALLBACK)
-        % Get multi-procedure averages if available
-        if isfield(operatorAnalysis, 'multiProcedureDayAverages') && isKey(operatorAnalysis.multiProcedureDayAverages, opName)
-            multiProcAvg = operatorAnalysis.multiProcedureDayAverages(opName);
-            
-            % Extract available metrics
-            if isfield(multiProcAvg, 'avgIdleTime')
-                data.AvgIdleTimePerDay(i) = multiProcAvg.avgIdleTime;
-            else
-                data.AvgIdleTimePerDay(i) = NaN;
-            end
-            
-            if isfield(multiProcAvg, 'medianIdleTime')
-                data.MedianIdleTimePerDay(i) = multiProcAvg.medianIdleTime;
-            else
-                data.MedianIdleTimePerDay(i) = data.AvgIdleTimePerDay(i);
-            end
-            
-            if isfield(multiProcAvg, 'avgFlips')
-                data.AvgFlipToTurnoverRatio(i) = multiProcAvg.avgFlips * 100; % Convert to percentage
-            elseif isfield(multiProcAvg, 'flipToTurnoverRatio')
-                data.AvgFlipToTurnoverRatio(i) = multiProcAvg.flipToTurnoverRatio;
-            else
-                data.AvgFlipToTurnoverRatio(i) = NaN;
-            end
-        else
-            data.AvgIdleTimePerDay(i) = NaN;
-            data.MedianIdleTimePerDay(i) = NaN;
-            data.AvgFlipToTurnoverRatio(i) = NaN;
-        end
-        
-        % Get case statistics from caseStats
-        if isfield(operatorAnalysis, 'caseStats') && isKey(operatorAnalysis.caseStats, opName)
-            caseArray = operatorAnalysis.caseStats(opName);
-            validCases = caseArray(~isnan(caseArray));
-            
-            if ~isempty(validCases)
-                data.TotalCases(i) = sum(validCases);
-                data.AvgCasesPerDay(i) = mean(validCases);
-                data.MedianCasesPerDay(i) = median(validCases);
-                data.StdCasesPerDay(i) = std(validCases);
-                data.TotalWorkingDays(i) = length(validCases);
-                
-                % Multi-procedure day metrics
-                data.MultiProcedureDays(i) = sum(validCases > 1);
-                data.MultiProcedureDaysPct(i) = (sum(validCases > 1) / length(validCases)) * 100;
-            else
-                data.TotalCases(i) = 0;
-                data.AvgCasesPerDay(i) = 0;
-                data.MedianCasesPerDay(i) = 0;
-                data.StdCasesPerDay(i) = 0;
-                data.TotalWorkingDays(i) = 0;
-                data.MultiProcedureDays(i) = 0;
-                data.MultiProcedureDaysPct(i) = 0;
-            end
-        else
-            % Set defaults
-            data.TotalCases(i) = 0;
-            data.AvgCasesPerDay(i) = 0;
-            data.MedianCasesPerDay(i) = 0;
-            data.StdCasesPerDay(i) = 0;
-            data.TotalWorkingDays(i) = 0;
-            data.MultiProcedureDays(i) = 0;
-            data.MultiProcedureDaysPct(i) = 0;
-        end
-        
-        % Get idle time statistics from idleTimeStats
-        if isfield(operatorAnalysis, 'idleTimeStats') && isKey(operatorAnalysis.idleTimeStats, opName)
-            idleArray = operatorAnalysis.idleTimeStats(opName);
-            validIdle = idleArray(~isnan(idleArray));
-            
-            if ~isempty(validIdle)
-                if isnan(data.AvgIdleTimePerDay(i)) % If not already set from multiProcAvg
-                    data.AvgIdleTimePerDay(i) = mean(validIdle);
-                    data.MedianIdleTimePerDay(i) = median(validIdle);
-                end
-                data.StdIdleTimePerDay(i) = std(validIdle);
-            else
-                data.StdIdleTimePerDay(i) = NaN;
-            end
-        else
-            data.StdIdleTimePerDay(i) = NaN;
-        end
-        
-        % Calculate derived efficiency metrics
-        if data.TotalCases(i) > 0 && data.TotalWorkingDays(i) > 0
-            data.AvgCasesPerHour(i) = data.AvgCasesPerDay(i) / 8; % Assuming 8-hour days
-            
-            % Simple utilization rate based on idle time
-            totalMinutesPerDay = 8 * 60; % 480 minutes per day
-            if ~isnan(data.AvgIdleTimePerDay(i)) && data.AvgIdleTimePerDay(i) >= 0
-                data.UtilizationRate(i) = (totalMinutesPerDay - data.AvgIdleTimePerDay(i)) / totalMinutesPerDay;
-            else
-                data.UtilizationRate(i) = NaN;
-            end
-        else
-            data.AvgCasesPerHour(i) = 0;
-            data.UtilizationRate(i) = NaN;
-        end
-        
-        % Set default/placeholder values for comprehensive metrics not available in basic analysis
-        data.AvgOvertimePerDay(i) = 0;
-        data.MedianOvertimePerDay(i) = 0;
-        data.StdOvertimePerDay(i) = 0;
-        
-        if ~isnan(data.AvgIdleTimePerDay(i))
-            data.AvgWorkTimePerDay(i) = 8 * 60 - data.AvgIdleTimePerDay(i);
-            data.MedianWorkTimePerDay(i) = data.AvgWorkTimePerDay(i);
-        else
-            data.AvgWorkTimePerDay(i) = NaN;
-            data.MedianWorkTimePerDay(i) = NaN;
-        end
-        
-        data.MedianFlipToTurnoverRatio(i) = data.AvgFlipToTurnoverRatio(i);
-        data.StdFlipToTurnoverRatio(i) = NaN;
-        data.P25FlipToTurnoverRatio(i) = NaN;
-        data.P75FlipToTurnoverRatio(i) = NaN;
-        data.P90FlipToTurnoverRatio(i) = NaN;
-        data.MinFlipToTurnoverRatio(i) = NaN;
-        data.MaxFlipToTurnoverRatio(i) = NaN;
-        data.DaysWithOvertime(i) = 0;
-        data.DaysWithOvertimePct(i) = 0;
-        
-        % Set default values for missing idle time percentiles
-        data.P25IdleTimePerDay(i) = NaN;
-        data.P75IdleTimePerDay(i) = NaN;
-        data.P90IdleTimePerDay(i) = NaN;
-        data.MinIdleTimePerDay(i) = NaN;
-        data.MaxIdleTimePerDay(i) = NaN;
-        
-        % Note: Idle time per turnover should ONLY come from comprehensive metrics (Method 1)
-        % Do not recalculate here - these values should remain NaN for fallback path
-        data.AvgIdleTimePerTurnover(i) = NaN;
-        data.MedianIdleTimePerTurnover(i) = NaN;
-        
-        % Set default values for idle time per turnover percentiles
-        data.StdIdleTimePerTurnover(i) = NaN;
-        data.P25IdleTimePerTurnover(i) = NaN;
-        data.P75IdleTimePerTurnover(i) = NaN;
-        data.P90IdleTimePerTurnover(i) = NaN;
-        data.MinIdleTimePerTurnover(i) = NaN;
-        data.MaxIdleTimePerTurnover(i) = NaN;
-        
-        % Case mix metrics - defaults
-        data.InpatientCases(i) = 0;
-        data.OutpatientCases(i) = 0;
-        data.InpatientProportion(i) = 0.5; % Default 50/50 split
-        data.OutpatientProportion(i) = 0.5;
-        
-        % Procedure diversity metrics - defaults
-        data.UniqueProcedureTypes(i) = 3; % Default estimate
-        data.ProcedureDiversityIndex(i) = 1.0; % Default diversity
-        
-        % Overall procedure metrics - defaults
-        data.AvgProcedureTime(i) = NaN;
-        data.MedianProcedureTime(i) = NaN;
-        data.StdProcedureTime(i) = NaN;
-        data.P25ProcedureTime(i) = NaN;
-        data.P75ProcedureTime(i) = NaN;
-        data.P90ProcedureTime(i) = NaN;
-        data.AvgSetupTime(i) = NaN;
-        data.MedianSetupTime(i) = NaN;
-        data.StdSetupTime(i) = NaN;
-        data.AvgPostTime(i) = NaN;
-        data.MedianPostTime(i) = NaN;
-        data.StdPostTime(i) = NaN;
-        
-        % Initialize procedure-specific metrics with default values (from fallback)
-        for proc = 1:length(procedureTypes)
-            procName = procedureTypes{proc};
-            safeProcName = matlab.lang.makeValidName(['Proc_' procName]);
-            
-            data.([safeProcName '_Count'])(i) = 0;
-            data.([safeProcName '_Proportion'])(i) = 0;
-            data.([safeProcName '_AvgDuration'])(i) = NaN;
-            data.([safeProcName '_MedianDuration'])(i) = NaN;
-            data.([safeProcName '_StdDuration'])(i) = NaN;
-            data.([safeProcName '_AvgSetup'])(i) = NaN;
-            data.([safeProcName '_MedianSetup'])(i) = NaN;
-            data.([safeProcName '_AvgPost'])(i) = NaN;
-            data.([safeProcName '_MedianPost'])(i) = NaN;
-        end
+        data.(standardName)(i) = opMetrics.(fieldName);
     end
 end
 
 %% Helper function for safe field access
 function value = getField(structure, fieldName, defaultValue)
     if isfield(structure, fieldName)
-        value = structure.(fieldName);
-        if isempty(value)
-            value = defaultValue;
-        end
-    else
+    value = structure.(fieldName);
+    if isempty(value)
         value = defaultValue;
+    end
+    else
+    value = defaultValue;
     end
 end
 
@@ -525,63 +325,63 @@ end
 % Convert to table if requested
 if exportToTable
     try
-        % Ensure all fields have the same number of rows and compatible types
-        fieldNames = fieldnames(data);
-        for f = 1:length(fieldNames)
-            fieldData = data.(fieldNames{f});
-            
-            % Handle different field types
-            if iscell(fieldData)
-                % Ensure cell array has correct length
-                if length(fieldData) < numOperators
-                    % Pad with empty strings
-                    fieldData((length(fieldData)+1):numOperators) = {''};
-                elseif length(fieldData) > numOperators
-                    fieldData = fieldData(1:numOperators);
-                end
-                % Ensure it's a column vector
-                if size(fieldData, 2) > size(fieldData, 1)
-                    fieldData = fieldData';
-                end
-                
-            elseif isnumeric(fieldData) || islogical(fieldData)
-                % Ensure numeric array has correct length
-                if length(fieldData) < numOperators
-                    if isnumeric(fieldData)
-                        fieldData((length(fieldData)+1):numOperators) = NaN;
-                    else
-                        fieldData((length(fieldData)+1):numOperators) = false;
-                    end
-                elseif length(fieldData) > numOperators
-                    fieldData = fieldData(1:numOperators);
-                end
-                % Ensure it's a column vector
-                if size(fieldData, 2) > size(fieldData, 1)
-                    fieldData = fieldData';
-                end
-                
-            else
-                % For other types, convert to string if possible
-                if ~iscell(fieldData)
-                    if ischar(fieldData) || isstring(fieldData)
-                        fieldData = cellstr(fieldData);
-                    else
-                        fieldData = repmat({''}, numOperators, 1);
-                    end
-                end
+    % Ensure all fields have the same number of rows and compatible types
+    fieldNames = fieldnames(data);
+    for f = 1:length(fieldNames)
+        fieldData = data.(fieldNames{f});
+        
+        % Handle different field types
+        if iscell(fieldData)
+            % Ensure cell array has correct length
+            if length(fieldData) < numOperators
+                % Pad with empty strings
+                fieldData((length(fieldData)+1):numOperators) = {''};
+            elseif length(fieldData) > numOperators
+                fieldData = fieldData(1:numOperators);
+            end
+            % Ensure it's a column vector
+            if size(fieldData, 2) > size(fieldData, 1)
+                fieldData = fieldData';
             end
             
-            data.(fieldNames{f}) = fieldData;
+        elseif isnumeric(fieldData) || islogical(fieldData)
+            % Ensure numeric array has correct length
+            if length(fieldData) < numOperators
+                if isnumeric(fieldData)
+                    fieldData((length(fieldData)+1):numOperators) = NaN;
+                else
+                    fieldData((length(fieldData)+1):numOperators) = false;
+                end
+            elseif length(fieldData) > numOperators
+                fieldData = fieldData(1:numOperators);
+            end
+            % Ensure it's a column vector
+            if size(fieldData, 2) > size(fieldData, 1)
+                fieldData = fieldData';
+            end
+            
+        else
+            % For other types, convert to string if possible
+            if ~iscell(fieldData)
+                if ischar(fieldData) || isstring(fieldData)
+                    fieldData = cellstr(fieldData);
+                else
+                    fieldData = repmat({''}, numOperators, 1);
+                end
+            end
         end
         
-        statisticalData.operatorTable = struct2table(data);
-        
+        data.(fieldNames{f}) = fieldData;
+    end
+    
+    statisticalData.operatorTable = struct2table(data);
+    
     catch ME
-        if verbose
-            fprintf('Warning: Could not create table - %s\n', ME.message);
-            fprintf('Returning data as structure instead\n');
-        end
-        statisticalData.operatorTable = data;
+    if verbose
+        fprintf('Warning: Could not create table - %s\n', ME.message);
+        fprintf('Returning data as structure instead\n');
+    end
+    statisticalData.operatorTable = data;
     end
     
     % Add variable descriptions
@@ -594,7 +394,7 @@ statisticalData.summaryStats = calculateSummaryStatistics(data, verbose);
 % Calculate correlation matrix if requested
 if includeCorrelations
     if verbose
-        fprintf('Calculating correlation matrix...\n');
+    fprintf('Calculating correlation matrix...\n');
     end
     statisticalData.correlationMatrix = calculateCorrelationMatrix(data, verbose);
 end
@@ -602,15 +402,15 @@ end
 % Export to CSV if requested
 if exportToCSV
     if verbose
-        fprintf('Exporting to CSV file: %s\n', outputFile);
+    fprintf('Exporting to CSV file: %s\n', outputFile);
     end
     
     if exportToTable && isfield(statisticalData, 'operatorTable')
-        writetable(statisticalData.operatorTable, outputFile);
+    writetable(statisticalData.operatorTable, outputFile);
     else
-        % Convert struct to table for CSV export
-        tempTable = struct2table(data);
-        writetable(tempTable, outputFile);
+    % Convert struct to table for CSV export
+    tempTable = struct2table(data);
+    writetable(tempTable, outputFile);
     end
     
     statisticalData.exportFiles{end+1} = outputFile;
@@ -627,10 +427,10 @@ if verbose
     fprintf('\nStatistical dataset creation completed successfully!\n');
     fprintf('Dataset contains %d operators and %d variables\n', numOperators, length(fieldnames(data)));
     if ~isempty(statisticalData.exportFiles)
-        fprintf('Exported files:\n');
-        for i = 1:length(statisticalData.exportFiles)
-            fprintf('  %s\n', statisticalData.exportFiles{i});
-        end
+    fprintf('Exported files:\n');
+    for i = 1:length(statisticalData.exportFiles)
+        fprintf('  %s\n', statisticalData.exportFiles{i});
+    end
     end
 end
 
@@ -734,19 +534,19 @@ for i = 1:length(fieldNames)
     fieldData = data.(fieldName);
     
     if isnumeric(fieldData) && ~islogical(fieldData)
-        % Calculate summary statistics
-        stats = struct();
-        stats.mean = mean(fieldData, 'omitnan');
-        stats.median = median(fieldData, 'omitnan');
-        stats.std = std(fieldData, 'omitnan');
-        stats.min = min(fieldData, [], 'omitnan');
-        stats.max = max(fieldData, [], 'omitnan');
-        stats.p25 = prctile(fieldData, 25);
-        stats.p75 = prctile(fieldData, 75);
-        stats.n = sum(~isnan(fieldData));
-        stats.missing = sum(isnan(fieldData));
-        
-        summaryStats.(fieldName) = stats;
+    % Calculate summary statistics
+    stats = struct();
+    stats.mean = mean(fieldData, 'omitnan');
+    stats.median = median(fieldData, 'omitnan');
+    stats.std = std(fieldData, 'omitnan');
+    stats.min = min(fieldData, [], 'omitnan');
+    stats.max = max(fieldData, [], 'omitnan');
+    stats.p25 = prctile(fieldData, 25);
+    stats.p75 = prctile(fieldData, 75);
+    stats.n = sum(~isnan(fieldData));
+    stats.missing = sum(isnan(fieldData));
+    
+    summaryStats.(fieldName) = stats;
     end
 end
 
@@ -769,8 +569,8 @@ for i = 1:length(fieldNames)
     fieldData = data.(fieldName);
     
     if isnumeric(fieldData) && ~islogical(fieldData) && length(fieldData) > 1
-        numericFields{end+1} = fieldName;
-        numericData(:, end+1) = fieldData;
+    numericFields{end+1} = fieldName;
+    numericData(:, end+1) = fieldData;
     end
 end
 

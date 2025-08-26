@@ -16,7 +16,8 @@
       "Bash(source:*)",
       "Bash(rm:*)",
       "Bash(timeout:*)",
-      "Bash(gtimeout:*)"
+      "Bash(gtimeout:*)",
+      "Bash(sed:*)"
     ],
     "deny": []
   }
