@@ -17,7 +17,10 @@
       "Bash(rm:*)",
       "Bash(timeout:*)",
       "Bash(gtimeout:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "WebFetch(domain:www.mathworks.com)",
+      "Bash(mv:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

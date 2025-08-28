@@ -638,7 +638,23 @@ end
 
 % Perform multiple linear regression
 try
-    [b, bint, r, rint, stats] = regress(finalTarget, [ones(length(finalTarget), 1), finalPredictors]);
+    % Ensure data is properly formatted and check for any issues
+    if any(~isfinite(finalTarget)) || any(~isfinite(finalPredictors(:)))
+        error('Input data contains non-finite values (NaN or Inf)');
+    end
+    
+    % Check for constant predictors
+    for i = 1:size(finalPredictors, 2)
+        if std(finalPredictors(:, i)) < 1e-12
+            error('Predictor %d (%s) is essentially constant', i, selectedPredictors{i});
+        end
+    end
+    
+    % Prepare design matrix (add intercept column)
+    X = [ones(length(finalTarget), 1), finalPredictors];
+    
+    % Use regress function with proper error checking
+    [b, bint, r, rint, stats] = regress(finalTarget, X);
     
     regressionResults.success = true;
     regressionResults.coefficients = b;
@@ -652,10 +668,22 @@ try
     regressionResults.fStat = stats(2);
     regressionResults.pValue = stats(3);
     
+    % Create summary table for regression results (including ALL tested correlations)
+    % Create a comprehensive summary table including all correlations, not just those used in regression
+    regressionResults.summaryTable = createComprehensiveRegressionSummaryTable(...
+        correlations.variables, correlations.coefficients, correlations.pValues, ...
+        selectedPredictors, b(2:end), bint(2:end, :), targetVariable);
+    
+    
     if verbose
         fprintf('\nRegression Results:\n');
         fprintf('R² = %.3f, F = %.2f, p = %.4f\n', stats(1), stats(2), stats(3));
         fprintf('Number of observations: %d\n', length(finalTarget));
+        
+        % Display summary table
+        fprintf('\n=== Regression Summary Table ===\n');
+        disp(regressionResults.summaryTable);
+        
         fprintf('\nCoefficients:\n');
         fprintf('  Intercept: %.4f [%.4f, %.4f]\n', b(1), bint(1,1), bint(1,2));
         for i = 1:numPredictors
@@ -675,5 +703,107 @@ end
 
 % Store correlation results
 regressionResults.correlationAnalysis = correlations;
+
+end
+
+function summaryTable = createRegressionSummaryTable(predictorNames, correlations, correlationPValues, coefficients, confidenceIntervals, targetVariable)
+% Create a summary table of regression results with correlations and confidence intervals
+
+numPredictors = length(predictorNames);
+
+% Create table data
+Predictor = predictorNames(:);
+Correlation = correlations(:);
+Correlation_PValue = correlationPValues(:);
+Regression_Coefficient = coefficients(:);
+CI_Lower = confidenceIntervals(:, 1);
+CI_Upper = confidenceIntervals(:, 2);
+CI_Width = CI_Upper - CI_Lower;
+
+% Calculate significance indicators
+Correlation_Significant = Correlation_PValue < 0.05;
+Significant = cell(numPredictors, 1);
+for i = 1:numPredictors
+    if Correlation_Significant(i)
+        if abs(Correlation(i)) >= 0.7
+            Significant{i} = '***'; % Strong significant correlation
+        elseif abs(Correlation(i)) >= 0.5
+            Significant{i} = '**';  % Moderate significant correlation
+        else
+            Significant{i} = '*';   % Weak significant correlation
+        end
+    else
+        Significant{i} = '';        % Not significant
+    end
+end
+
+% Create the table
+summaryTable = table(Predictor, Correlation, Correlation_PValue, Significant, ...
+    Regression_Coefficient, CI_Lower, CI_Upper, CI_Width, ...
+    'VariableNames', {'Predictor', 'Correlation', 'Corr_PValue', 'Significance', ...
+    'Coefficient', 'CI_Lower', 'CI_Upper', 'CI_Width'});
+
+% Sort by absolute correlation strength
+[~, sortIdx] = sort(abs(summaryTable.Correlation), 'descend');
+summaryTable = summaryTable(sortIdx, :);
+
+end
+
+function summaryTable = createComprehensiveRegressionSummaryTable(allPredictorNames, allCorrelations, allCorrelationPValues, selectedPredictors, selectedCoefficients, selectedConfidenceIntervals, targetVariable)
+% Create a comprehensive summary table including ALL tested correlations and regression results for selected predictors
+
+numAllPredictors = length(allPredictorNames);
+
+% Create table data for all predictors
+Predictor = allPredictorNames(:);
+Correlation = allCorrelations(:);
+Corr_PValue = allCorrelationPValues(:);
+
+% Initialize regression columns with NaN
+Coefficient = nan(numAllPredictors, 1);
+CI_Lower = nan(numAllPredictors, 1);
+CI_Upper = nan(numAllPredictors, 1);
+InRegression = false(numAllPredictors, 1);
+
+% Fill in regression results for selected predictors
+for i = 1:length(selectedPredictors)
+    % Find index of this selected predictor in the all predictors list
+    idx = find(strcmp(allPredictorNames, selectedPredictors{i}), 1);
+    if ~isempty(idx)
+        Coefficient(idx) = selectedCoefficients(i);
+        CI_Lower(idx) = selectedConfidenceIntervals(i, 1);
+        CI_Upper(idx) = selectedConfidenceIntervals(i, 2);
+        InRegression(idx) = true;
+    end
+end
+
+CI_Width = CI_Upper - CI_Lower;
+
+% Calculate significance indicators based on correlation p-values
+Correlation_Significant = Corr_PValue < 0.05;
+Significance = cell(numAllPredictors, 1);
+for i = 1:numAllPredictors
+    if Correlation_Significant(i)
+        if abs(Correlation(i)) >= 0.7
+            Significance{i} = '***'; % Strong significant correlation
+        elseif abs(Correlation(i)) >= 0.5
+            Significance{i} = '**';  % Moderate significant correlation
+        else
+            Significance{i} = '*';   % Weak significant correlation
+        end
+    else
+        Significance{i} = '';        % Not significant
+    end
+end
+
+% Create the comprehensive table
+summaryTable = table(Predictor, Correlation, Corr_PValue, Significance, ...
+    InRegression, Coefficient, CI_Lower, CI_Upper, CI_Width, ...
+    'VariableNames', {'Predictor', 'Correlation', 'Corr_PValue', 'Significance', ...
+    'InRegression', 'Coefficient', 'CI_Lower', 'CI_Upper', 'CI_Width'});
+
+% Sort by absolute correlation strength (strongest first)
+[~, sortIdx] = sort(abs(summaryTable.Correlation), 'descend');
+summaryTable = summaryTable(sortIdx, :);
 
 end
