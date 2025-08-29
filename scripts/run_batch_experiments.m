@@ -23,10 +23,8 @@ function batchResults = run_batch_experiments(configFunction, varargin)
     saveResults = p.Results.SaveResults;
     outputDir = p.Results.OutputDir;
     
-    % Add paths to existing scripts
+    % Add paths (already in scripts directory)
     addpath('experiments/configs');
-    addpath('experiments/runners');
-    addpath('scripts');
     addpath('data');
     addpath('clinicalData');
     

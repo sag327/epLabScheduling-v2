@@ -7,10 +7,15 @@ This directory contains an experiment framework for testing EP scheduling optimi
 ```
 experiments/
 ├── configs/           # Experiment configuration files
-├── runners/          # Experiment execution scripts  
 ├── results/          # Output directories (auto-created)
 ├── analysis/         # Analysis scripts (future)
 └── EXPERIMENT_GUIDE.md
+
+scripts/              # All experiment runners are in main scripts directory
+├── run_experiment.m          # Single experiment runner
+├── run_batch_experiments.m   # Batch experiment runner  
+├── calculate_experiment_metrics.m  # Enhanced metrics calculation
+└── (other existing scripts...)
 ```
 
 ## Key Design Philosophy
@@ -28,7 +33,7 @@ experiments/
 ```matlab
 % Add experiment paths
 addpath('experiments/configs');
-addpath('experiments/runners');
+addpath('scripts');
 
 % Run baseline experiment
 config = baseline_config();

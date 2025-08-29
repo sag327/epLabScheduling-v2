@@ -10,7 +10,7 @@ function [historicalData, historicalSchedules] = loadHistoricalDataFromFile(vara
 %
 % Parameters:
 %   FilePath - Path to Excel file containing historical procedure data
-%              Default: 'procedureDurationsB.xlsx'
+%          [    Default: 'procedureDurationsB.xlsx'
 %   CreateSchedules - Whether to reconstruct historical schedules (default: true)
 %   TurnoverTime - Estimated turnover time for historical schedules (default: 15 minutes)
 %   Debug - Show debug output during schedule reconstruction (default: false)

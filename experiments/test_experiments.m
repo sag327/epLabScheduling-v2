@@ -9,7 +9,7 @@ fprintf('=== Testing EP Scheduling Experiments Framework ===\n\n');
 
 % Add required paths
 addpath('experiments/configs');
-addpath('experiments/runners');
+addpath('scripts');
 
 %% Test 1: Configuration Loading
 fprintf('1. Testing configuration loading...\n');

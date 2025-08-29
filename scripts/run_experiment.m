@@ -29,8 +29,7 @@ function results = run_experiment(config, varargin)
     fprintf('Running experiment: %s\n', config.experimentName);
     fprintf('Description: %s\n', config.description);
     
-    % Add paths to existing scripts
-    addpath('scripts');
+    % Add paths (already in scripts directory)
     addpath('data');
     addpath('clinicalData');
     
