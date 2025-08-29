@@ -38,7 +38,7 @@ parse(p, schedule, varargin{:});
 
 % if historicalSchedule object is passed, separate into schedule and
 % results 
-if ~exist('results')
+if ~isequal(exist('results'),1)
     if isfield(schedule,'results')
         results = schedule.results;
         schedule = schedule.schedule;
