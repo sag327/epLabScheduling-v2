@@ -12,17 +12,43 @@ export PATH="/Applications/MATLAB_R2025a.app/bin:$PATH"
 source setup_matlab.sh
 ```
 
+## Project Structure
+
+```
+epScheduling/
+├── scripts/                    # All MATLAB scripts
+│   ├── scheduleHistoricalCases.m      # Core optimization engine
+│   ├── rescheduleHistoricalCases.m    # Historical data re-optimization
+│   ├── loadHistoricalDataFromFile.m   # Data loading from Excel
+│   ├── run_experiment.m              # Single experiment runner
+│   ├── run_batch_experiments.m       # Batch experiment runner
+│   ├── calculate_experiment_metrics.m # Enhanced metrics calculation
+│   └── (other analysis and utility scripts)
+├── experiments/                 # Experiment framework
+│   ├── configs/                # Experiment configurations
+│   │   ├── baseline_config.m          # Default configuration
+│   │   ├── turnover_study.m           # Turnover time parameter study
+│   │   └── lab_capacity_study.m       # Lab capacity parameter study
+│   ├── results/               # Auto-created experiment outputs
+│   ├── test_experiments.m     # Comprehensive test suite
+│   └── EXPERIMENT_GUIDE.md    # Detailed usage instructions
+├── data/                      # Processed data files
+├── clinicalData/             # Raw clinical data (Excel files)
+├── logs/                     # Processing logs
+└── archive/                  # Archived/deprecated files
+```
+
 ## Quick Tests
 
 ```bash
 # Test basic MATLAB functionality
 matlab -batch "run('test_matlab_basic.m')"
 
-# Test optimized scheduling function
-matlab -batch "run('test_scheduleHistoricalCases.m')"
+# Test experiment framework
+matlab -batch "run('experiments/test_experiments.m')"
 
-# Test turnover time and visualization
-matlab -batch "run('test_turnover_and_visualization.m')"
+# Test single experiment
+matlab -batch "addpath('experiments/configs'); addpath('scripts'); config=baseline_config(); results=run_experiment(config,'SaveResults',false);"
 ```
 
 ## Project Status
@@ -33,54 +59,123 @@ matlab -batch "run('test_turnover_and_visualization.m')"
 - Variable pre-filtering (20-50% fewer iterations)
 - **Combined: 20-100x performance improvement**
 
+✅ **Experiment Framework Complete:**
+- **Systematic parameter studies:** Turnover time, lab capacity, start time studies
+- **Enhanced metrics:** Operator idle/turnover ratios, flip ratios, lab throughput
+- **Batch processing:** Run multiple experiments automatically
+- **Integration:** Uses existing working scripts for reliability
+
 ✅ **New Features Added:**
 - **Room turnover time:** Configurable parameter (default 15 minutes)
 - **Comprehensive visualization:** Gantt charts with operator timelines
 - **Detailed metrics:** Lab utilization, idle time, overtime analysis
 
-✅ **All Tests Passing:** Multiple test scenarios successful
-
-## Key Files
-
-- `scheduleHistoricalCases.m` - Main optimized scheduling function with turnover time
-- `visualizeOptimizedSchedule.m` - Comprehensive schedule visualization
-- `test_turnover_and_visualization.m` - Turnover time and visualization tests
-- `test_scheduleHistoricalCases.m` - Original comprehensive test suite
-- `test_matlab_basic.m` - MATLAB environment verification
-- `setup_matlab.sh` - Command line setup script
+✅ **All Tests Passing:** Core scripts and experiment framework verified
 
 ## Usage Examples
 
 ### Basic Scheduling with Turnover Time
 ```matlab
+% Add paths
+addpath('scripts');
+
 % Default 15-minute turnover
 [schedule, results] = scheduleHistoricalCases(cases);
 
 % Custom 30-minute turnover
 [schedule, results] = scheduleHistoricalCases(cases, 'turnoverTime', 30);
 
-% No turnover time
-[schedule, results] = scheduleHistoricalCases(cases, 'turnoverTime', 0);
+% Historical data re-optimization
+[schedule, results] = rescheduleHistoricalCases(historicalData, 'NumLabs', 3, 'TurnoverTime', 15);
 ```
 
-### Schedule Visualization
+### Experiment Framework Usage
 ```matlab
-% Basic visualization
-visualizeOptimizedSchedule(schedule, results);
+% Add experiment paths
+addpath('experiments/configs');
+addpath('scripts');
 
-% Custom options
-visualizeOptimizedSchedule(schedule, results, ...
-    'Title', 'My EP Schedule', ...
-    'ShowTurnover', true, ...
-    'FontSize', 12);
+% Single experiment
+config = baseline_config();
+results = run_experiment(config);
+
+% Batch experiments
+batchResults = run_batch_experiments(@turnover_study);
+batchResults = run_batch_experiments(@lab_capacity_study);
+
+% View results
+fprintf('Makespan: %.1f hours\n', results.metrics.makespan/60);
+fprintf('Lab utilization: %.1f%%\n', results.metrics.avgLabUtilization);
+fprintf('Efficiency score: %.1f%%\n', results.metrics.efficiencyScore);
 ```
 
-### Turnover Time Impact Analysis
+### Data Loading Workflow
 ```matlab
-% Test different turnover times
-[sched15, res15] = scheduleHistoricalCases(cases, 'turnoverTime', 15);
-[sched30, res30] = scheduleHistoricalCases(cases, 'turnoverTime', 30);
+% Load historical data from Excel
+[historicalData, historicalSchedules] = loadHistoricalDataFromFile('clinicalData/testProcedureDurations-3day.xlsx');
 
-fprintf('15-min turnover makespan: %.1f hours\n', res15.makespan/60);
-fprintf('30-min turnover makespan: %.1f hours\n', res30.makespan/60);
+% Re-optimize for specific date
+targetDate = '02-Jan-2025';
+[schedule, results] = rescheduleHistoricalCases(historicalData, 'TargetDate', targetDate);
 ```
+
+### Enhanced Metrics Analysis
+```matlab
+% Run experiment and analyze EP-specific metrics
+config = baseline_config();
+results = run_experiment(config);
+metrics = results.metrics;
+
+fprintf('Operator idle/turnover ratio: %.3f\n', metrics.operatorIdleToTurnoverRatio);
+fprintf('Flip/turnover ratio: %.3f\n', metrics.flipToTurnoverRatio);
+fprintf('Cases per hour: %.1f\n', metrics.casesPerHour);
+```
+
+## Key Files and Scripts
+
+### Core Scheduling Scripts
+- `scripts/scheduleHistoricalCases.m` - Main optimization engine with ILP solver
+- `scripts/rescheduleHistoricalCases.m` - Historical data re-optimization wrapper
+- `scripts/loadHistoricalDataFromFile.m` - Excel data loader with validation
+- `scripts/reconstructHistoricalSchedule.m` - Historical schedule reconstruction
+- `scripts/visualizeSchedule.m` - Schedule visualization tools
+
+### Experiment Framework
+- `scripts/run_experiment.m` - Single experiment runner
+- `scripts/run_batch_experiments.m` - Batch experiment processor
+- `scripts/calculate_experiment_metrics.m` - Enhanced metrics calculation
+- `experiments/configs/baseline_config.m` - Default experiment configuration
+- `experiments/test_experiments.m` - Comprehensive test suite
+
+### Data Processing
+- `scripts/getCasesByDate.m` - Extract cases for specific dates
+- `scripts/createStatisticalDataset.m` - Statistical analysis dataset creation
+- `scripts/analyzeHistoricalData.m` - Historical schedule analysis
+
+## Data Workflow
+
+### 1. Data Loading
+```matlab
+% Load from Excel file
+[historicalData, historicalSchedules] = loadHistoricalDataFromFile('clinicalData/testProcedureDurations-3day.xlsx');
+% Creates: data/historicalEPData.mat, data/historicalEPSchedules.mat
+```
+
+### 2. Single Day Optimization
+```matlab
+% Re-optimize specific date
+[schedule, results] = rescheduleHistoricalCases(historicalData, 'TargetDate', '02-Jan-2025');
+```
+
+### 3. Systematic Experiments
+```matlab
+% Parameter studies
+batchResults = run_batch_experiments(@turnover_study);  % Test 5,10,15,20,30 min turnover
+batchResults = run_batch_experiments(@lab_capacity_study);  % Test 2,3,4,5 labs
+```
+
+## Available Clinical Data Files
+- `clinicalData/testProcedureDurations-1day.xlsx` - Single day test data
+- `clinicalData/testProcedureDurations-3day.xlsx` - Three day test data (recommended)
+- `clinicalData/testProcedureDurations-7day.xlsx` - Week-long data
+- `clinicalData/procedureDurations-Q1-Q2-2025.xlsx` - Full quarterly data
