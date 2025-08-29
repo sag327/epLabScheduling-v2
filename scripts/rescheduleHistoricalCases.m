@@ -281,8 +281,11 @@ end
 function [schedule, results] = optimizeSingleDaySchedule(cases, numLabs, turnoverTime, method)
 % Optimize schedule for a single day using scheduleHistoricalCases
 
+% Create lab start times (all labs start at 8:00 AM by default)
+labStartTimes = repmat({'8:00'}, 1, numLabs);
+
 % Use the standard scheduleHistoricalCases function with available parameters
-[schedule, results] = scheduleHistoricalCases(cases, 'numLabs', numLabs, 'turnoverTime', turnoverTime);
+[schedule, results] = scheduleHistoricalCases(cases, 'numLabs', numLabs, 'turnoverTime', turnoverTime, 'labStartTimes', labStartTimes);
 
 end
 
