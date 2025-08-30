@@ -55,68 +55,15 @@ function results = run_experiment(config, varargin)
     
     % Calculate enhanced metrics using the same script as historical analysis
     fprintf('Calculating performance metrics using analyzeHistoricalData...\n');
-    if isfield(experimentData, 'fullScheduleContainer') && ~isempty(experimentData.fullScheduleContainer)
-        % Multi-date experiment: convert to format expected by analyzeHistoricalData
-        analysisScheduleContainer = createAnalysisScheduleContainer(experimentData.fullScheduleContainer, experimentData.fullResultsContainer);
-        analysisResults = analyzeHistoricalData(experimentData.historicalData, ...
-            'HistoricalSchedules', analysisScheduleContainer, ...
-            'ShowStats', false);
-    else
-        % Single date experiment: create temporary container
-        tempContainer = containers.Map();
-        scheduleData = struct();
-        scheduleData.schedule = schedule;
-        scheduleData.results = scheduleResults;
-        scheduleData.date = experimentData.targetDate;
-        
-        % Calculate case count from schedule
-        totalCases = 0;
-        if isfield(schedule, 'labs') && ~isempty(schedule.labs)
-            for j = 1:length(schedule.labs)
-                if ~isempty(schedule.labs{j})
-                    totalCases = totalCases + length(schedule.labs{j});
-                end
-            end
-        end
-        scheduleData.numCases = totalCases;
-        
-        tempContainer(experimentData.targetDate) = scheduleData;
-        
-        analysisResults = analyzeHistoricalData(experimentData.historicalData, ...
-            'HistoricalSchedules', tempContainer, ...
-            'ShowStats', false);
-    end
     
-    % Extract all metrics from analyzeHistoricalData and flatten structure
-    metrics = struct();
-    metrics.optimizationTime = optimizationTime;
+    % Convert to format expected by analyzeHistoricalData (always multi-date)
+    analysisScheduleContainer = createAnalysisScheduleContainer(experimentData.fullScheduleContainer, experimentData.fullResultsContainer);
+    analysisResults = analyzeHistoricalData(experimentData.historicalData, ...
+        'HistoricalSchedules', analysisScheduleContainer, ...
+        'ShowStats', false);
     
-    % Flatten schedule analysis metrics
-    if isfield(analysisResults, 'scheduleAnalysis')
-        scheduleMetrics = analysisResults.scheduleAnalysis;
-        fields = fieldnames(scheduleMetrics);
-        for i = 1:length(fields)
-            metrics.(fields{i}) = scheduleMetrics.(fields{i});
-        end
-    end
-    
-    % Flatten operator analysis metrics
-    if isfield(analysisResults, 'operatorAnalysis')
-        operatorMetrics = analysisResults.operatorAnalysis;
-        fields = fieldnames(operatorMetrics);
-        for i = 1:length(fields)
-            metrics.(fields{i}) = operatorMetrics.(fields{i});
-        end
-    end
-    
-    % Flatten lab flip analysis metrics
-    if isfield(analysisResults, 'labFlipAnalysis')
-        flipMetrics = analysisResults.labFlipAnalysis;
-        fields = fieldnames(flipMetrics);
-        for i = 1:length(fields)
-            metrics.(fields{i}) = flipMetrics.(fields{i});
-        end
-    end
+    % Store analysis results without flattening
+    analysisResults.optimizationTime = optimizationTime;
     
     % Store simplified results structure
     results = struct();
@@ -125,59 +72,40 @@ function results = run_experiment(config, varargin)
     results.config = config;
     results.timestamp = datestr(now);
     results.outputDir = outputDir;
+    results.experimentData = experimentData;
     
-    % Flatten all metrics to top level
-    metricFields = fieldnames(metrics);
-    for i = 1:length(metricFields)
-        results.(metricFields{i}) = metrics.(metricFields{i});
-    end
+    % Store analysis results without flattening (preserves structure from analyzeHistoricalData)
+    results.analysisResults = analysisResults;
     
     % Schedule data (same format as loadHistoricalDataFromFile)
-    if isfield(experimentData, 'fullScheduleContainer') && ~isempty(experimentData.fullScheduleContainer)
-        % Multi-date results: container for accessing specific dates
-        results.schedule = createHistoricalScheduleContainer(experimentData.fullScheduleContainer, experimentData.fullResultsContainer);
-    else
-        % Single date results: direct access
-        scheduleData = struct();
-        scheduleData.schedule = schedule;
-        scheduleData.results = scheduleResults;
-        scheduleData.date = experimentData.targetDate;
-        
-        % Calculate case count from schedule
-        totalCases = 0;
-        if isfield(schedule, 'labs') && ~isempty(schedule.labs)
-            for j = 1:length(schedule.labs)
-                if ~isempty(schedule.labs{j})
-                    totalCases = totalCases + length(schedule.labs{j});
-                end
-            end
-        end
-        scheduleData.numCases = totalCases;
-        
-        results.schedule = scheduleData;
-    end
+    results.schedule = createHistoricalScheduleContainer(experimentData.fullScheduleContainer, experimentData.fullResultsContainer);
     
     % Save results if requested
     if saveResults
         fprintf('Saving results to: %s\n', outputDir);
         save(fullfile(outputDir, 'experiment_results.mat'), 'results');
         
-        % Save summary using flattened results
+        % Save summary using structured results
         summary = struct();
         summary.experimentName = config.experimentName;
         summary.description = config.description;
-        summary.optimizationTime = results.optimizationTime;
+        summary.optimizationTime = results.analysisResults.optimizationTime;
         summary.timestamp = results.timestamp;
         
-        % Add key metrics if they exist (using flattened field names)
-        if isfield(results, 'makespan')
-            summary.makespan = results.makespan;
+        % Add key metrics from structured analysis
+        if isfield(results.analysisResults, 'scheduleAnalysis')
+            if isfield(results.analysisResults.scheduleAnalysis, 'avgMakespan')
+                summary.avgMakespan = results.analysisResults.scheduleAnalysis.avgMakespan;
+            end
+            if isfield(results.analysisResults.scheduleAnalysis, 'avgLabUtilization')
+                summary.avgLabUtilization = results.analysisResults.scheduleAnalysis.avgLabUtilization;
+            end
         end
-        if isfield(results, 'avgLabUtilization')
-            summary.labUtilization = results.avgLabUtilization;
-        end
-        if isfield(results, 'operatorIdleToTurnoverRatio')
-            summary.operatorIdleToTurnoverRatio = results.operatorIdleToTurnoverRatio;
+        
+        if isfield(results.analysisResults, 'operatorAnalysis')
+            if isfield(results.analysisResults.operatorAnalysis, 'operatorIdleToTurnoverRatio')
+                summary.operatorIdleToTurnoverRatio = results.analysisResults.operatorAnalysis.operatorIdleToTurnoverRatio;
+            end
         end
         save(fullfile(outputDir, 'summary.mat'), 'summary');
     end
@@ -232,11 +160,10 @@ end
 function [schedule, scheduleResults, experimentData] = runRealDataExperiment(config)
     % Run experiment with real data using existing working scripts
     
-    fprintf('Loading historical data using existing workflow...\n');
+    fprintf('Loading historical data using...\n');
 
-    fprintf('Processing Excel file: %s\n', config.dataFile);
-    % Use the existing loadHistoricalDataFromFile function
-    [historicalData, ~] = loadHistoricalDataFromFile(config.dataFile);
+    % Suppress output during data loading
+    evalc_output = evalc('[historicalData, ~] = loadHistoricalDataFromFile(config.dataFile);');
     
     % Get available dates
     uniqueDates = unique(historicalData.date);
@@ -247,49 +174,30 @@ function [schedule, scheduleResults, experimentData] = runRealDataExperiment(con
     % Process all dates by default (no TargetDate parameter)
     fprintf('Processing all %d dates in dataset\n', length(uniqueDates));
     
-    fprintf('Running scheduling optimization...\n');
-    % Use the existing rescheduleHistoricalCases function
-    [schedule, scheduleResults] = rescheduleHistoricalCases(historicalData, ...
-        'NumLabs', config.numLabs, ...
-        'TurnoverTime', config.turnoverTime, ...
-        'ShowProgress', config.verboseOutput);
+    fprintf('Optimizing schedules for %d dates...\n', length(uniqueDates));
     
-    % When processing all dates, rescheduleHistoricalCases returns containers
-    % Keep the full container but also extract first date for metrics calculation
-    if isa(schedule, 'containers.Map') && isa(scheduleResults, 'containers.Map')
-        dateKeys = keys(scheduleResults);
-        if ~isempty(dateKeys)
-            fprintf('Successfully processed %d dates: %s\n', length(dateKeys), strjoin(dateKeys, ', '));
-            
-            % Store the full containers for user access
-            fullScheduleContainer = schedule;
-            fullResultsContainer = scheduleResults;
-            
-            % Extract first date for metrics calculation
-            firstDate = dateKeys{1};
-            schedule = schedule(firstDate);
-            scheduleResults = scheduleResults(firstDate);
-            fprintf('Using %s results for metrics calculation\n', firstDate);
-        else
-            error('No successful optimizations found in results');
-        end
-    else
-        % Single date case - no containers
-        fullScheduleContainer = [];
-        fullResultsContainer = [];
+    % Create custom progress tracking
+    [schedule, scheduleResults] = optimizeWithProgress(historicalData, config, uniqueDates);
+    
+    % Verify we got containers from multi-date optimization
+    if ~isa(schedule, 'containers.Map') || ~isa(scheduleResults, 'containers.Map')
+        error('Expected containers.Map from multi-date optimization');
     end
+    
+    dateKeys = keys(scheduleResults);
+    if isempty(dateKeys)
+        error('No successful optimizations found in results');
+    end
+    
+    fprintf('Successfully processed %d dates\n', length(dateKeys));
     
     % Return experiment metadata
     experimentData = struct();
     experimentData.targetDate = 'All dates';
     experimentData.dataSource = 'real';
     experimentData.historicalData = historicalData;
-    
-    % Pass back the full containers if they exist
-    if exist('fullScheduleContainer', 'var') && ~isempty(fullScheduleContainer)
-        experimentData.fullScheduleContainer = fullScheduleContainer;
-        experimentData.fullResultsContainer = fullResultsContainer;
-    end
+    experimentData.fullScheduleContainer = schedule;
+    experimentData.fullResultsContainer = scheduleResults;
 end
 
 function analysisContainer = createAnalysisScheduleContainer(scheduleContainer, resultsContainer)
@@ -360,4 +268,40 @@ function historicalScheduleContainer = createHistoricalScheduleContainer(schedul
         
         historicalScheduleContainer(dateStr) = scheduleData;
     end
+end
+
+function [schedule, scheduleResults] = optimizeWithProgress(historicalData, config, uniqueDates)
+    % Custom optimization with progress bar for each date
+    
+    numDates = length(uniqueDates);
+    progressLength = 50;
+    fprintf('Progress: [');
+    
+    % Initialize containers
+    schedule = containers.Map();
+    scheduleResults = containers.Map();
+    
+    for i = 1:numDates
+        dateStr = char(uniqueDates(i));
+        
+        % Optimize single date with suppressed output
+        evalc_output = evalc('[daySchedule, dayResults] = rescheduleHistoricalCases(historicalData, ''TargetDate'', dateStr, ''NumLabs'', config.numLabs, ''TurnoverTime'', config.turnoverTime, ''ShowProgress'', false);');
+        
+        % Store results
+        schedule(dateStr) = daySchedule;
+        scheduleResults(dateStr) = dayResults;
+        
+        % Update progress bar
+        progress = i / numDates;
+        currentProgress = floor(progress * progressLength);
+        expectedProgress = floor((i-1) / numDates * progressLength);
+        
+        % Print new progress characters
+        for j = (expectedProgress + 1):currentProgress
+            fprintf('=');
+        end
+    end
+    
+    % Complete progress bar
+    fprintf('] 100%%\n');
 end
