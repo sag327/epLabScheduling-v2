@@ -1,8 +1,34 @@
-function plotAnalysisResults(analysisResults)
+function plotAnalysisResults(analysisResults, varargin)
 % Create subplots showing operator performance metrics from multi-procedure days
 % Uses pre-calculated flip-to-turnover ratios and correlates with selected procedure metrics
-% Version: 2.1.0
-% Input: analysisResults - structure returned by analyzeHistoricalData
+% Version: 2.2.0
+%
+% Inputs:
+%   analysisResults - structure returned by analyzeHistoricalData
+%
+% Optional Parameters:
+%   'CreateCorrelationPlot' - logical, create correlation plot (default: false)
+%   'CreateTimeSeriesPlot'  - logical, create time series plot (default: false)
+%   'SelectedProcedure'     - string, procedure for correlation (default: auto-select)
+%   'SelectedMetric'        - string, metric for correlation (default: auto-select)
+%
+% Examples:
+%   plotAnalysisResults(analysisResults)  % Basic plots only
+%   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true)
+%   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true, 'CreateTimeSeriesPlot', true)
+
+% Parse optional parameters
+p = inputParser();
+addParameter(p, 'CreateCorrelationPlot', false, @islogical);
+addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
+addParameter(p, 'SelectedProcedure', '', @ischar);
+addParameter(p, 'SelectedMetric', '', @ischar);
+parse(p, varargin{:});
+
+createCorrelationPlot = p.Results.CreateCorrelationPlot;
+createTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
+selectedProcedure = p.Results.SelectedProcedure;
+selectedMetric = p.Results.SelectedMetric;
 
 if ~isfield(analysisResults, 'operatorAnalysis') || ...
    ~isfield(analysisResults.operatorAnalysis, 'multiProcedureDayAverages')
@@ -96,13 +122,14 @@ validOperators = validOperators(sortIdx);
 
 flipsPerTurnoverRatio = flipsPerTurnoverRatio .* 100;
 
-% Create first figure: Proportion of Turnovers that are Flips
+% Create combined figure with flip ratio on top and idle time on bottom
 figure('Position', [100, 100, 1400, 1000]);
 
+% Top subplot: Proportion of Turnovers that are Flips
+subplot(2, 1, 1);
 bar(validOperators, flipsPerTurnoverRatio);
 set(gca, 'XTickLabel', validOperators);
 xtickangle(45);
-xlabel('Operator');
 ylabel('% of Turnovers');
 title('Proportion of Turnovers that are Flips by Operator (Multi-Procedure Days Only)');
 grid on;
@@ -112,13 +139,11 @@ for i = 1:length(flipsPerTurnoverRatio)
          'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
 end
 
-% Create second figure: Median Idle Time to Average Number of Turnovers Ratio
-figure('Position', [200, 200, 1400, 1000]);
-
+% Bottom subplot: Median Idle Time to Average Number of Turnovers Ratio
+subplot(2, 1, 2);
 bar(validOperators, medianIdleTimeToTurnoverRatio);
 set(gca, 'XTickLabel', validOperators);
 xtickangle(45);
-xlabel('Operator');
 ylabel('Median Idle Time per Turnover (minutes)');
 title('Median Idle Time per Turnover by Operator (Multi-Procedure Days Only)');
 grid on;
@@ -128,21 +153,20 @@ for i = 1:length(medianIdleTimeToTurnoverRatio)
          'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
 end
 
-% Ask user if they want to create a correlation plot
-answer = questdlg('Do you want to create a correlation plot with procedure metrics?', ...
-                  'Correlation Analysis', 'Yes', 'No', 'Yes');
-
-if strcmp(answer, 'Yes')
-    % Get available procedures and metrics from analysis results
-    [selectedProcedure, selectedMetric] = selectProcedureAndMetric(analysisResults);
+% Create correlation plot if requested
+if createCorrelationPlot
+    % Auto-select or use provided procedure/metric
+    if isempty(selectedProcedure) || isempty(selectedMetric)
+        [selectedProcedure, selectedMetric] = selectProcedureAndMetric(analysisResults);
+    end
     
     if ~isempty(selectedProcedure) && ~isempty(selectedMetric)
-        % Collect correlation data based on user selection
+        % Collect correlation data based on selection
         [correlationValues, correlationOperators, correlationFlipRatios] = ...
             collectCorrelationData(analysisResults, validOperators, flipsPerTurnoverRatio, ...
                                   selectedProcedure, selectedMetric);
         
-        % Create correlation plot with reselect capability
+        % Create correlation plot
         createCorrelationPlot(correlationValues, correlationOperators, correlationFlipRatios, ...
                              selectedProcedure, selectedMetric, analysisResults, validOperators, flipsPerTurnoverRatio);
     else
@@ -150,11 +174,8 @@ if strcmp(answer, 'Yes')
     end
 end
 
-% Ask user if they want to create a time series plot
-answer = questdlg('Do you want to create a time series plot showing flip-to-turnover ratios over time?', ...
-                  'Time Series Analysis', 'Yes', 'No', 'Yes');
-
-if strcmp(answer, 'Yes')
+% Create time series plot if requested
+if createTimeSeriesPlot
     createTimeSeriesPlot(analysisResults);
 end
 

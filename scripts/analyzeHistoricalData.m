@@ -129,6 +129,9 @@ if showStats
 end
 analysisResults.comprehensiveOperatorMetrics = createComprehensiveOperatorMetrics(historicalData, analysisResults.operatorAnalysis, showStats);
 
+% Calculate operator efficiency summary using comprehensive metrics
+analysisResults.scheduleAnalysis.operatorEfficiencySummary = calculateOperatorEfficiencySummary([], [], [], analysisResults.comprehensiveOperatorMetrics);
+
 % Save analysis report if requested
 if saveReport
     saveAnalysisReport(historicalData, reportFile);
@@ -590,6 +593,11 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     % Calculate averages for multi-procedure days
     operatorAnalysis.multiProcedureDayAverages = calculateMultiProcedureAverages(...
         operatorCaseStats, operatorIdleStats, operatorFlipStats);
+    
+    % Note: Operator efficiency summary will be calculated after comprehensive metrics are created
+    
+    % Calculate lab efficiency summary statistics
+    scheduleAnalysis.labEfficiencySummary = calculateLabEfficiencySummary(allLabUtilizations, allMakespans, scheduleKeys, historicalSchedules);
     
     labFlipAnalysis.operatorFlipStats = operatorFlipStats;
     labFlipAnalysis.dailyLabFlips = dailyLabFlips;
@@ -2377,4 +2385,117 @@ if showStats
     fprintf('  Each operator has detailed procedure-specific metrics and case mix analysis\n');
 end
 
+end
+
+function operatorSummary = calculateOperatorEfficiencySummary(~, ~, ~, comprehensiveOperatorMetrics)
+    % Calculate summary efficiency statistics across all operators using comprehensive metrics
+    
+    operatorNames = fieldnames(comprehensiveOperatorMetrics);
+    
+    % Collect metrics from comprehensive operator metrics
+    allIdleToTurnoverRatios = [];
+    
+    for i = 1:length(operatorNames)
+        safeOpName = operatorNames{i};
+        compMetrics = comprehensiveOperatorMetrics.(safeOpName);
+        
+        % Idle to turnover ratios (same as working plotAnalysisResults)
+        if isfield(compMetrics, 'medianIdleTimePerTurnover') && ~isnan(compMetrics.medianIdleTimePerTurnover)
+            allIdleToTurnoverRatios = [allIdleToTurnoverRatios, compMetrics.medianIdleTimePerTurnover];
+        end
+    end
+    
+    % Calculate summary statistics
+    operatorSummary = struct();
+    
+    % Idle time to turnover ratio statistics (minutes per turnover)
+    if ~isempty(allIdleToTurnoverRatios)
+        operatorSummary.idleToTurnoverRatio.mean = mean(allIdleToTurnoverRatios);
+        operatorSummary.idleToTurnoverRatio.median = median(allIdleToTurnoverRatios);
+        operatorSummary.idleToTurnoverRatio.std = std(allIdleToTurnoverRatios);
+        operatorSummary.idleToTurnoverRatio.range = [min(allIdleToTurnoverRatios), max(allIdleToTurnoverRatios)];
+        operatorSummary.idleToTurnoverRatio.count = length(allIdleToTurnoverRatios);
+    else
+        operatorSummary.idleToTurnoverRatio = struct('mean', NaN, 'median', NaN, 'std', NaN, 'range', [NaN, NaN], 'count', 0);
+    end
+    
+    % Idle to turnover ratio statistics
+    if ~isempty(allIdleToTurnoverRatios)
+        operatorSummary.idleToTurnoverRatio.mean = mean(allIdleToTurnoverRatios);
+        operatorSummary.idleToTurnoverRatio.median = median(allIdleToTurnoverRatios);
+        operatorSummary.idleToTurnoverRatio.std = std(allIdleToTurnoverRatios);
+        operatorSummary.idleToTurnoverRatio.range = [min(allIdleToTurnoverRatios), max(allIdleToTurnoverRatios)];
+    else
+        operatorSummary.idleToTurnoverRatio = struct('mean', NaN, 'median', NaN, 'std', NaN, 'range', [NaN, NaN]);
+    end
+    
+    operatorSummary.totalOperators = length(operatorNames);
+    operatorSummary.totalObservations = length(allIdleToTurnoverRatios);
+end
+
+function labSummary = calculateLabEfficiencySummary(allLabUtilizations, allMakespans, scheduleKeys, historicalSchedules)
+    % Calculate lab efficiency summary statistics
+    
+    % Collect procedures per hour across all dates and labs
+    allProceduresPerHour = [];
+    totalProcedures = 0;
+    totalLabHours = 0;
+    
+    for i = 1:length(scheduleKeys)
+        dateStr = scheduleKeys{i};
+        if isKey(historicalSchedules, dateStr)
+            scheduleData = historicalSchedules(dateStr);
+            schedule = scheduleData.schedule;
+            results = scheduleData.results;
+            
+            % Count procedures across all labs for this date
+            dayProcedures = 0;
+            if isfield(schedule, 'labs') && ~isempty(schedule.labs)
+                for labIdx = 1:length(schedule.labs)
+                    if ~isempty(schedule.labs{labIdx})
+                        dayProcedures = dayProcedures + length(schedule.labs{labIdx});
+                    end
+                end
+            end
+            
+            % Calculate procedures per hour for this date
+            if isfield(results, 'makespan') && results.makespan > 0
+                dayProceduresPerHour = dayProcedures / (results.makespan / 60);
+                allProceduresPerHour = [allProceduresPerHour, dayProceduresPerHour];
+                
+                totalProcedures = totalProcedures + dayProcedures;
+                totalLabHours = totalLabHours + (results.makespan / 60);
+            end
+        end
+    end
+    
+    % Calculate summary statistics
+    labSummary = struct();
+    
+    % Lab utilization statistics (already calculated)
+    labSummary.utilization.mean = mean(allLabUtilizations);
+    labSummary.utilization.median = median(allLabUtilizations);
+    labSummary.utilization.std = std(allLabUtilizations);
+    labSummary.utilization.range = [min(allLabUtilizations), max(allLabUtilizations)];
+    
+    % Procedures per hour statistics
+    if ~isempty(allProceduresPerHour)
+        labSummary.proceduresPerHour.mean = mean(allProceduresPerHour);
+        labSummary.proceduresPerHour.median = median(allProceduresPerHour);
+        labSummary.proceduresPerHour.std = std(allProceduresPerHour);
+        labSummary.proceduresPerHour.range = [min(allProceduresPerHour), max(allProceduresPerHour)];
+        labSummary.proceduresPerHour.overall = totalProcedures / totalLabHours;
+    else
+        labSummary.proceduresPerHour = struct('mean', NaN, 'median', NaN, 'std', NaN, 'range', [NaN, NaN], 'overall', NaN);
+    end
+    
+    % Makespan statistics (already calculated)
+    labSummary.makespan.mean = mean(allMakespans);
+    labSummary.makespan.median = median(allMakespans);
+    labSummary.makespan.std = std(allMakespans);
+    labSummary.makespan.range = [min(allMakespans), max(allMakespans)];
+    
+    labSummary.totalDates = length(scheduleKeys);
+    labSummary.totalProcedures = totalProcedures;
+    labSummary.totalLabHours = totalLabHours;
 end

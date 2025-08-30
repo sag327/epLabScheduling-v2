@@ -160,7 +160,7 @@ end
 function [schedule, scheduleResults, experimentData] = runRealDataExperiment(config)
     % Run experiment with real data using existing working scripts
     
-    fprintf('Loading historical data using...\n');
+    fprintf('Loading historical data...\n');
 
     % Suppress output during data loading
     evalc_output = evalc('[historicalData, ~] = loadHistoricalDataFromFile(config.dataFile);');
@@ -254,11 +254,12 @@ function historicalScheduleContainer = createHistoricalScheduleContainer(schedul
         scheduleData.date = dateStr;
         
         % Add basic case count for compatibility
-        if ~isempty(scheduleData.schedule.labs)
+        sched = scheduleData.schedule;
+        if isfield(sched, 'labs') && ~isempty(sched.labs)
             totalCases = 0;
-            for j = 1:length(scheduleData.schedule.labs)
-                if ~isempty(scheduleData.schedule.labs{j})
-                    totalCases = totalCases + length(scheduleData.schedule.labs{j});
+            for j = 1:length(sched.labs)
+                if ~isempty(sched.labs{j})
+                    totalCases = totalCases + length(sched.labs{j});
                 end
             end
             scheduleData.numCases = totalCases;

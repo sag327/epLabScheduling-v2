@@ -10,16 +10,17 @@ function config = baseline_config()
     
     % Experiment metadata
     config.experimentName = 'labCount-5';
-    config.description = 'EP scheduling experiment: reschedule with different number of labs';
+    config.description = 'EP scheduling experiment: varying number of labs';
     
     % Data configuration
     config.dataFile = '~/Documents/codeProjects/epScheduling/clinicalData/procedureDurations-Q1-Q2-2025.xlsx';  % Use real data by default
+    %config.dataFile = '~/Documents/codeProjects/epScheduling/clinicalData/testProcedureDurations-7day.xlsx';  
     config.useSyntheticData = false;  % Set to true to use synthetic data instead
     
     % Scheduling parameters
     config.numLabs = 5;           % Number of EP labs
     config.startTime = 480;       % Start time in minutes (8:00 AM)
-    config.endTime = 1080;        % End time in minutes (6:00 PM)
+    config.endTime = 1439;        % End time in minutes (6:00 PM)
     config.turnoverTime = 15;     % Turnover time between cases (minutes)
     
     % Experiment options
