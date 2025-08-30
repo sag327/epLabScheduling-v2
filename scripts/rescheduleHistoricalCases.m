@@ -13,6 +13,7 @@ function [optimizedSchedule, results, historicalComparison] = rescheduleHistoric
 %   TargetDate - Specific date to re-schedule (default: all dates)
 %   NumLabs - Number of labs to use for optimization (default: auto-detect from historical data)
 %   TurnoverTime - Turnover time between cases in minutes (default: 15)
+%   LabStartTimes - Cell array of start times for each lab (default: {'8:00', '8:00', ...})
 %   OptimizationMethod - 'makespan', 'utilization', or 'balanced' (default: 'balanced')
 %   CompareWithHistorical - Whether to compare with historical schedules (default: true)
 %   ShowProgress - Whether to show progress during optimization (default: true)
@@ -29,6 +30,7 @@ turnoverTime = 15;
 optimizationMethod = 'balanced';
 compareWithHistorical = true;
 showProgress = true;
+labStartTimes = {};
 
 % Parse optional parameters
 i = 1;
@@ -52,6 +54,9 @@ while i <= length(varargin)
                 i = i + 2;
             case 'showprogress'
                 showProgress = varargin{i+1};
+                i = i + 2;
+            case 'labstarttimes'
+                labStartTimes = varargin{i+1};
                 i = i + 2;
             otherwise
                 error('Unknown parameter: %s', char(varargin{i}));
@@ -139,7 +144,7 @@ for i = 1:length(uniqueDates)
         
         % Create optimized schedule for this date
         [daySchedule, dayResults] = optimizeSingleDaySchedule(casesForDate, numLabs, ...
-            turnoverTime, optimizationMethod);
+            turnoverTime, optimizationMethod, labStartTimes);
         
         % Compare with historical if requested
         dayComparison = [];
@@ -278,11 +283,13 @@ end
 
 end
 
-function [schedule, results] = optimizeSingleDaySchedule(cases, numLabs, turnoverTime, method)
+function [schedule, results] = optimizeSingleDaySchedule(cases, numLabs, turnoverTime, method, labStartTimes)
 % Optimize schedule for a single day using scheduleHistoricalCases
 
-% Create lab start times (all labs start at 8:00 AM by default)
-labStartTimes = repmat({'8:00'}, 1, numLabs);
+% Create default lab start times if not provided
+if isempty(labStartTimes)
+    labStartTimes = repmat({'8:00'}, 1, numLabs);
+end
 
 % Use the standard scheduleHistoricalCases function with available parameters
 [schedule, results] = scheduleHistoricalCases(cases, 'numLabs', numLabs, 'turnoverTime', turnoverTime, 'labStartTimes', labStartTimes);

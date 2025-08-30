@@ -9,6 +9,7 @@ function plotAnalysisResults(analysisResults, varargin)
 % Optional Parameters:
 %   'CreateCorrelationPlot' - logical, create correlation plot (default: false)
 %   'CreateTimeSeriesPlot'  - logical, create time series plot (default: false)
+%   'CreateBoxPlots'        - logical, create box and whisker plots (default: false)
 %   'SelectedProcedure'     - string, procedure for correlation (default: auto-select)
 %   'SelectedMetric'        - string, metric for correlation (default: auto-select)
 %
@@ -16,17 +17,20 @@ function plotAnalysisResults(analysisResults, varargin)
 %   plotAnalysisResults(analysisResults)  % Basic plots only
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true, 'CreateTimeSeriesPlot', true)
+%   plotAnalysisResults(analysisResults, 'CreateBoxPlots', true)
 
 % Parse optional parameters
 p = inputParser();
 addParameter(p, 'CreateCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
+addParameter(p, 'CreateBoxPlots', false, @islogical);
 addParameter(p, 'SelectedProcedure', '', @ischar);
 addParameter(p, 'SelectedMetric', '', @ischar);
 parse(p, varargin{:});
 
 createCorrelationPlot = p.Results.CreateCorrelationPlot;
 createTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
+createBoxPlots = p.Results.CreateBoxPlots;
 selectedProcedure = p.Results.SelectedProcedure;
 selectedMetric = p.Results.SelectedMetric;
 
@@ -122,14 +126,13 @@ validOperators = validOperators(sortIdx);
 
 flipsPerTurnoverRatio = flipsPerTurnoverRatio .* 100;
 
-% Create combined figure with flip ratio on top and idle time on bottom
+% Create first figure: Proportion of Turnovers that are Flips
 figure('Position', [100, 100, 1400, 1000]);
 
-% Top subplot: Proportion of Turnovers that are Flips
-subplot(2, 1, 1);
 bar(validOperators, flipsPerTurnoverRatio);
 set(gca, 'XTickLabel', validOperators);
 xtickangle(45);
+xlabel('Operator');
 ylabel('% of Turnovers');
 title('Proportion of Turnovers that are Flips by Operator (Multi-Procedure Days Only)');
 grid on;
@@ -139,11 +142,13 @@ for i = 1:length(flipsPerTurnoverRatio)
          'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
 end
 
-% Bottom subplot: Median Idle Time to Average Number of Turnovers Ratio
-subplot(2, 1, 2);
+% Create second figure: Median Idle Time to Average Number of Turnovers Ratio
+figure('Position', [200, 200, 1400, 1000]);
+
 bar(validOperators, medianIdleTimeToTurnoverRatio);
 set(gca, 'XTickLabel', validOperators);
 xtickangle(45);
+xlabel('Operator');
 ylabel('Median Idle Time per Turnover (minutes)');
 title('Median Idle Time per Turnover by Operator (Multi-Procedure Days Only)');
 grid on;
@@ -177,6 +182,11 @@ end
 % Create time series plot if requested
 if createTimeSeriesPlot
     createTimeSeriesPlot(analysisResults);
+end
+
+% Create box plots if requested
+if createBoxPlots
+    createBoxPlotsForMetrics(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators);
 end
 
 fprintf('Charts created with %d operators\n', length(validOperators));
@@ -645,4 +655,62 @@ if validOperatorCount > 0
 else
     fprintf('No valid time series data found for flip-to-turnover ratios\n');
 end
+end
+
+function createBoxPlotsForMetrics(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators)
+% Create box and whisker plots for the two main metrics
+%
+% Inputs:
+%   flipsPerTurnoverRatio - array of flip-to-turnover ratios (%)
+%   medianIdleTimeToTurnoverRatio - array of idle time per turnover (minutes)
+%   validOperators - cell array of operator names
+
+if isempty(flipsPerTurnoverRatio) || isempty(medianIdleTimeToTurnoverRatio)
+    fprintf('No data available for box plots\n');
+    return;
+end
+
+% Create first box plot: Flip-to-Turnover Ratios
+figure('Position', [300, 300, 800, 600]);
+boxplot(flipsPerTurnoverRatio);
+title('Distribution of Flip-to-Turnover Ratios (Multi-Procedure Days Only)');
+ylabel('% of Turnovers that are Flips');
+xlabel('All Operators');
+grid on;
+
+% Add summary statistics as text
+stats1 = struct();
+stats1.mean = mean(flipsPerTurnoverRatio);
+stats1.median = median(flipsPerTurnoverRatio);
+stats1.std = std(flipsPerTurnoverRatio);
+stats1.min = min(flipsPerTurnoverRatio);
+stats1.max = max(flipsPerTurnoverRatio);
+
+text(0.98, 0.98, sprintf('Mean: %.1f%%\nMedian: %.1f%%\nStd: %.1f%%\nRange: %.1f%% - %.1f%%\nn = %d', ...
+    stats1.mean, stats1.median, stats1.std, stats1.min, stats1.max, length(flipsPerTurnoverRatio)), ...
+    'Units', 'normalized', 'VerticalAlignment', 'top', 'HorizontalAlignment', 'right', 'FontSize', 10, ...
+    'BackgroundColor', 'white', 'EdgeColor', 'black');
+
+% Create second box plot: Idle Time per Turnover
+figure('Position', [400, 400, 800, 600]);
+boxplot(medianIdleTimeToTurnoverRatio);
+title('Distribution of Median Idle Time per Turnover (Multi-Procedure Days Only)');
+ylabel('Median Idle Time per Turnover (minutes)');
+xlabel('All Operators');
+grid on;
+
+% Add summary statistics as text
+stats2 = struct();
+stats2.mean = mean(medianIdleTimeToTurnoverRatio);
+stats2.median = median(medianIdleTimeToTurnoverRatio);
+stats2.std = std(medianIdleTimeToTurnoverRatio);
+stats2.min = min(medianIdleTimeToTurnoverRatio);
+stats2.max = max(medianIdleTimeToTurnoverRatio);
+
+text(0.98, 0.98, sprintf('Mean: %.1f min\nMedian: %.1f min\nStd: %.1f min\nRange: %.1f - %.1f min\nn = %d', ...
+    stats2.mean, stats2.median, stats2.std, stats2.min, stats2.max, length(medianIdleTimeToTurnoverRatio)), ...
+    'Units', 'normalized', 'VerticalAlignment', 'top', 'HorizontalAlignment', 'right', 'FontSize', 10, ...
+    'BackgroundColor', 'white', 'EdgeColor', 'black');
+
+fprintf('Box plots created showing distribution of metrics across %d operators\n', length(validOperators));
 end

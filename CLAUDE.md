@@ -23,14 +23,13 @@ epScheduling/
 │   ├── run_experiment.m              # Single experiment runner
 │   ├── run_batch_experiments.m       # Batch experiment runner
 │   ├── calculate_experiment_metrics.m # Enhanced metrics calculation
+│   ├── baseline_config.m              # Default experiment configuration
+│   ├── turnover_study.m               # Turnover time parameter study
+│   ├── lab_capacity_study.m           # Lab capacity parameter study
+│   ├── test_experiments.m             # Comprehensive test suite
 │   └── (other analysis and utility scripts)
 ├── experiments/                 # Experiment framework
-│   ├── configs/                # Experiment configurations
-│   │   ├── baseline_config.m          # Default configuration
-│   │   ├── turnover_study.m           # Turnover time parameter study
-│   │   └── lab_capacity_study.m       # Lab capacity parameter study
 │   ├── results/               # Auto-created experiment outputs
-│   ├── test_experiments.m     # Comprehensive test suite
 │   └── EXPERIMENT_GUIDE.md    # Detailed usage instructions
 ├── data/                      # Processed data files
 ├── clinicalData/             # Raw clinical data (Excel files)
@@ -45,10 +44,10 @@ epScheduling/
 matlab -batch "run('test_matlab_basic.m')"
 
 # Test experiment framework
-matlab -batch "run('experiments/test_experiments.m')"
+matlab -batch "run('scripts/test_experiments.m')"
 
 # Test single experiment
-matlab -batch "addpath('experiments/configs'); addpath('scripts'); config=baseline_config(); results=run_experiment(config,'SaveResults',false);"
+matlab -batch "addpath('scripts'); config=baseline_config(); results=run_experiment(config,'SaveResults',false);"
 ```
 
 ## Project Status
@@ -91,8 +90,7 @@ addpath('scripts');
 
 ### Experiment Framework Usage
 ```matlab
-% Add experiment paths
-addpath('experiments/configs');
+% Add scripts path
 addpath('scripts');
 
 % Single experiment
@@ -144,8 +142,10 @@ fprintf('Cases per hour: %.1f\n', metrics.casesPerHour);
 - `scripts/run_experiment.m` - Single experiment runner
 - `scripts/run_batch_experiments.m` - Batch experiment processor
 - `scripts/calculate_experiment_metrics.m` - Enhanced metrics calculation
-- `experiments/configs/baseline_config.m` - Default experiment configuration
-- `experiments/test_experiments.m` - Comprehensive test suite
+- `scripts/baseline_config.m` - Default experiment configuration
+- `scripts/turnover_study.m` - Turnover time parameter study
+- `scripts/lab_capacity_study.m` - Lab capacity parameter study
+- `scripts/test_experiments.m` - Comprehensive test suite
 
 ### Data Processing
 - `scripts/getCasesByDate.m` - Extract cases for specific dates

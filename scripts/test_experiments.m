@@ -7,9 +7,7 @@
 
 fprintf('=== Testing EP Scheduling Experiments Framework ===\n\n');
 
-% Add required paths
-addpath('experiments/configs');
-addpath('scripts');
+% Add required paths (all scripts now in scripts/ directory)
 
 %% Test 1: Configuration Loading
 fprintf('1. Testing configuration loading...\n');
@@ -92,8 +90,7 @@ end
 %% Test 5: Integration with Existing Scripts
 fprintf('5. Testing integration with existing scripts...\n');
 try
-    % Test direct usage of existing scripts
-    addpath('scripts');
+    % Test direct usage of existing scripts (all in current directory)
     
     [historicalData, ~] = loadHistoricalDataFromFile('clinicalData/testProcedureDurations-3day.xlsx');
     fprintf('   ✓ loadHistoricalDataFromFile works: %d cases loaded\n', length(historicalData.caseID));
@@ -124,6 +121,6 @@ fprintf('integrates with existing working scripts from scripts/ directory.\n\n')
 fprintf('Ready to run:\n');
 fprintf('• Single experiments: results = run_experiment(baseline_config());\n');
 fprintf('• Batch experiments: batchResults = run_batch_experiments(@turnover_study);\n');
-fprintf('• Custom configurations: Edit config files in experiments/configs/\n\n');
+fprintf('• Custom configurations: Edit config files in scripts/\n\n');
 
 fprintf('See experiments/EXPERIMENT_GUIDE.md for detailed usage instructions.\n');

@@ -9,16 +9,16 @@ function config = baseline_config()
     config = struct();
     
     % Experiment metadata
-    config.experimentName = 'labCount-6';
-    config.description = 'EP scheduling experiment: varying number of labs';
+    config.experimentName = 'staggeredStart_1_730';
+    config.description = 'EP scheduling experiment: staggering start times';
     
     % Data configuration
     config.dataFile = '~/Documents/codeProjects/epScheduling/clinicalData/procedureDurations-Q1-Q2-2025.xlsx';  % Use real data by default
     %config.dataFile = '~/Documents/codeProjects/epScheduling/clinicalData/testProcedureDurations-7day.xlsx';  
     
     % Scheduling parameters
-    config.numLabs = 6;           % Number of EP labs
-    config.startTime = 480;       % Start time in minutes (8:00 AM)
+    config.numLabs = 5;           % Number of EP labs
+    config.startTime = {'8:00','8:00','8:00','8:00','8:00'};  % Lab start times (cell array of strings)
     config.endTime = 1439;        % End time in minutes (6:00 PM)
     config.turnoverTime = 15;     % Turnover time between cases (minutes)
     

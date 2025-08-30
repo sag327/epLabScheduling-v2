@@ -238,7 +238,15 @@ function [schedule, scheduleResults] = optimizeWithProgress(historicalData, conf
         dateStr = char(uniqueDates(i));
         
         % Optimize single date with suppressed output
-        evalc_output = evalc('[daySchedule, dayResults] = rescheduleHistoricalCases(historicalData, ''TargetDate'', dateStr, ''NumLabs'', config.numLabs, ''TurnoverTime'', config.turnoverTime, ''ShowProgress'', false);');
+        % Build parameter list for rescheduleHistoricalCases
+        paramList = {'TargetDate', dateStr, 'NumLabs', config.numLabs, 'TurnoverTime', config.turnoverTime, 'ShowProgress', false};
+        
+        % Add lab start times if defined in config
+        if isfield(config, 'startTime') && iscell(config.startTime)
+            paramList = [paramList, {'LabStartTimes', config.startTime}];
+        end
+        
+        evalc_output = evalc('[daySchedule, dayResults] = rescheduleHistoricalCases(historicalData, paramList{:});');
         
         % Store results
         schedule(dateStr) = daySchedule;
