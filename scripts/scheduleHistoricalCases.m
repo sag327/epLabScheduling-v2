@@ -38,6 +38,7 @@ addParameter(p, 'maxOperatorTime', 480, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'turnoverTime', 15, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'enforceMiddnight', true, @islogical);
 addParameter(p, 'prioritizeOutpatient', true, @islogical);
+addParameter(p, 'operatorAvailability', containers.Map(), @(x) isa(x, 'containers.Map'));
 addParameter(p, 'verbose', true, @islogical);
 
 parse(p, cases, varargin{:});
@@ -50,6 +51,7 @@ maxOperatorTime = p.Results.maxOperatorTime;
 turnoverTime = p.Results.turnoverTime;
 enforceMiddnight = p.Results.enforceMiddnight;
 prioritizeOutpatient = p.Results.prioritizeOutpatient;
+operatorAvailability = p.Results.operatorAvailability;
 verbose = p.Results.verbose;
 
 if verbose
@@ -112,13 +114,14 @@ if prioritizeOutpatient && ~strcmp(caseFilter, 'inpatient')
                 fprintf('Phase 2: Scheduling %d inpatient cases with outpatient constraints\n', length(inpatientCases));
             end
             
-            % Update lab start times based on outpatient schedule completion
-            updatedLabStartTimes = calculateUpdatedLabTimes(phase1Schedule, labStartTimes);
+            % Update lab start times and calculate operator availability
+            [updatedLabStartTimes, operatorAvailability] = calculateUpdatedLabTimes(phase1Schedule, labStartTimes);
             
-            % Recursively call with inpatient cases and updated start times
+            % Recursively call with inpatient cases, updated start times, and operator availability
             [phase2Schedule, phase2Results] = scheduleHistoricalCases(inpatientCases, ...
                 'numLabs', numLabs, ...
                 'labStartTimes', updatedLabStartTimes, ...
+                'operatorAvailability', operatorAvailability, ...
                 'optimizationMetric', optimizationMetric, ...
                 'caseFilter', 'all', ...
                 'maxOperatorTime', maxOperatorTime, ...
@@ -504,6 +507,52 @@ if verbose
     fprintf(' Complete\n');
 end
 
+% Constraint 3.5: Operator availability constraints (for two-phase scheduling)
+if ~isempty(operatorAvailability)
+    if verbose
+        fprintf('Building constraint 3.5 (operator availability from phase 1)...');
+    end
+    
+    % Build constraints to prevent scheduling before operators are available
+    constraint3_5Rows = [];
+    constraint3_5Cols = [];
+    
+    for i = 1:numCases
+        operatorName = cases(i).operator;
+        if isKey(operatorAvailability, operatorName)
+            operatorAvailTime = operatorAvailability(operatorName);
+            
+            for j = 1:numLabs
+                if labPreferences(i, j) == 1
+                    for t = validTimeSlots{j}
+                        startTime = timeSlots(t);
+                        procStartTime = startTime + caseSetupTimes(i);
+                        
+                        % If procedure would start before operator is available, forbid this assignment
+                        if procStartTime < operatorAvailTime
+                            constraint3_5Rows = [constraint3_5Rows; length(constraint3_5Rows) + 1];
+                            constraint3_5Cols = [constraint3_5Cols; getVarIndex(i, j, t)];
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    if ~isempty(constraint3_5Rows)
+        constraint3_5Values = ones(length(constraint3_5Rows), 1);
+        numConstraint3_5 = max(constraint3_5Rows);
+        constraint3_5Matrix = sparse(constraint3_5Rows, constraint3_5Cols, constraint3_5Values, numConstraint3_5, numVars);
+        A(ineqRowIdx + (1:numConstraint3_5), :) = constraint3_5Matrix;
+        b(ineqRowIdx + (1:numConstraint3_5)) = 0;  % These assignments are forbidden (≤ 0)
+        ineqRowIdx = ineqRowIdx + numConstraint3_5;
+    end
+    
+    if verbose
+        fprintf(' Complete\n');
+    end
+end
+
 % Constraint 4: Lab start time constraints
 if verbose
     fprintf('Building constraint 4 (lab start times)...');
@@ -552,12 +601,14 @@ end
 
 % Constraint 5: Symmetry breaking (prefer lower-numbered labs to reduce search space)
 % Since labs are identical, ensure total usage of lab j >= total usage of lab j+1
+% Skip this constraint when optimizing for operator idle time to allow optimal operator scheduling
 if verbose
     fprintf('Building constraint 5 (symmetry breaking)...');
 end
 
-constraint5Count = numLabs - 1;
-if constraint5Count > 0
+constraint5Count = 0;
+if ~strcmp(optimizationMetric, 'operatorIdle') && (numLabs - 1) > 0
+    constraint5Count = numLabs - 1;
     % Estimate number of non-zeros for pre-allocation
     totalEntries = 0;
     for j = 1:numLabs-1
@@ -1175,12 +1226,14 @@ end
 
 %% Helper functions for two-phase scheduling
 
-function updatedLabStartTimes = calculateUpdatedLabTimes(phase1Schedule, originalLabStartTimes)
-% Calculate updated lab start times based on when phase 1 (outpatient) schedule ends
-% This ensures phase 2 (inpatient) cases start after outpatient cases are complete
+function [updatedLabStartTimes, operatorAvailability] = calculateUpdatedLabTimes(phase1Schedule, originalLabStartTimes)
+% Calculate updated lab start times and operator availability based on when phase 1 (outpatient) schedule ends
+% This ensures phase 2 (inpatient) cases start after outpatient cases are complete and operators are available
 
 updatedLabStartTimes = originalLabStartTimes;
+operatorAvailability = containers.Map();
 
+% Calculate when each lab becomes available
 for labIdx = 1:length(phase1Schedule.labs)
     labSchedule = phase1Schedule.labs{labIdx};
     
@@ -1208,7 +1261,39 @@ for labIdx = 1:length(phase1Schedule.labs)
     end
 end
 
+% Calculate when each operator becomes available (when their last procedure ends)
+if isfield(phase1Schedule, 'operators') && ~isempty(phase1Schedule.operators)
+    operatorKeys = keys(phase1Schedule.operators);
+    for i = 1:length(operatorKeys)
+        operatorName = operatorKeys{i};
+        opSchedule = phase1Schedule.operators(operatorName);
+        
+        % Find the latest procedure end time for this operator
+        latestProcEndTime = 0;
+        for caseIdx = 1:length(opSchedule)
+            procEndTime = opSchedule(caseIdx).caseInfo.procEndTime;
+            if procEndTime > latestProcEndTime
+                latestProcEndTime = procEndTime;
+            end
+        end
+        
+        % Store operator availability time in minutes
+        operatorAvailability(operatorName) = latestProcEndTime;
+    end
+end
+
 fprintf('Updated lab start times for phase 2: %s\n', strjoin(updatedLabStartTimes, ', '));
+if ~isempty(operatorAvailability)
+    fprintf('Operator availability for phase 2:\n');
+    opNames = keys(operatorAvailability);
+    for i = 1:length(opNames)
+        opName = opNames{i};
+        availTime = operatorAvailability(opName);
+        hours = floor(availTime / 60);
+        minutes = mod(availTime, 60);
+        fprintf('  %s: %02d:%02d\n', opName, hours, minutes);
+    end
+end
 end
 
 function [combinedSchedule, combinedResults] = combineSchedules(phase1Schedule, phase1Results, phase2Schedule, phase2Results, verbose)

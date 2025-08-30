@@ -3,8 +3,7 @@ function results = run_experiment(config, varargin)
     % 
     % This runner uses existing working scripts:
     % - scripts/loadHistoricalDataFromFile.m for data loading
-    % - scripts/rescheduleHistoricalCases.m for real data optimization
-    % - scripts/scheduleHistoricalCases.m for synthetic data optimization
+    % - scripts/rescheduleHistoricalCases.m for optimization
     %
     % Syntax:
     %   results = run_experiment(config)
@@ -44,13 +43,9 @@ function results = run_experiment(config, varargin)
         mkdir(outputDir);
     end
     
-    % Run experiment based on data type
+    % Run experiment with real data
     tic;
-    if config.useSyntheticData
-        [schedule, scheduleResults, experimentData] = runSyntheticExperiment(config);
-    else
-        [schedule, scheduleResults, experimentData] = runRealDataExperiment(config);
-    end
+    [schedule, scheduleResults, experimentData] = runRealDataExperiment(config);
     optimizationTime = toc;
     
     % Calculate enhanced metrics using the same script as historical analysis
@@ -113,49 +108,6 @@ function results = run_experiment(config, varargin)
     fprintf('Experiment completed successfully!\n\n');
 end
 
-function [schedule, scheduleResults, experimentData] = runSyntheticExperiment(config)
-    % Run experiment with synthetic data using scheduleHistoricalCases
-    
-    fprintf('Creating synthetic test cases...\n');
-    
-    % Create synthetic cases (simple implementation)
-    numCases = 5;
-    cases = struct();
-    operators = {'Dr. Smith', 'Dr. Johnson', 'Dr. Brown'};
-    procedures = {'Ablation', 'PM Implant', 'ICD Implant'};
-    
-    for i = 1:numCases
-        cases(i).caseID = sprintf('CASE_%03d', i);
-        cases(i).operator = operators{randi(length(operators))};
-        cases(i).procedure = procedures{randi(length(procedures))};
-        cases(i).setupTime = 20 + randi(20);  % 20-40 minutes
-        cases(i).procTime = 60 + randi(120);  % 60-180 minutes
-        cases(i).postTime = 10 + randi(20);   % 10-30 minutes
-        cases(i).admissionStatus = 'Hospital Outpatient Surgery (Amb Proc)';
-        cases(i).priority = [];
-        cases(i).preferredLab = [];
-    end
-    
-    fprintf('Created %d synthetic test cases\n', numCases);
-    
-    % Convert start time to lab start times format
-    startHour = floor(config.startTime / 60);
-    startMin = mod(config.startTime, 60);
-    startTimeStr = sprintf('%d:%02d', startHour, startMin);
-    labStartTimes = repmat({startTimeStr}, 1, config.numLabs);
-    
-    fprintf('Running scheduling optimization...\n');
-    [schedule, scheduleResults] = scheduleHistoricalCases(cases, ...
-        'turnoverTime', config.turnoverTime, ...
-        'numLabs', config.numLabs, ...
-        'labStartTimes', labStartTimes, ...
-        'verbose', config.verboseOutput);
-    
-    % Return experiment metadata
-    experimentData = struct();
-    experimentData.targetDate = 'Synthetic';
-    experimentData.dataSource = 'synthetic';
-end
 
 function [schedule, scheduleResults, experimentData] = runRealDataExperiment(config)
     % Run experiment with real data using existing working scripts
