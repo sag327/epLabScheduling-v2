@@ -648,16 +648,8 @@ correlationMatrix.matrix = corrMatrix;
 correlationMatrix.variableNames = numericFields;
 correlationMatrix.size = size(corrMatrix);
 
-if verbose
-    fprintf('Correlation matrix calculated for %d numeric variables\n', length(numericFields));
-end
-    % Operator group label (string)
-    if isfield(opMetrics, 'operatorGroup') && ~isempty(opMetrics.operatorGroup)
-        data.OperatorGroup{i} = char(opMetrics.operatorGroup);
-        operatorGroupNames{i} = char(opMetrics.operatorGroup);
-    else
-        data.OperatorGroup{i} = 'Other';
-        operatorGroupNames{i} = 'Other';
+    if verbose
+        fprintf('Correlation matrix calculated for %d numeric variables\n', length(numericFields));
     end
 
 end
