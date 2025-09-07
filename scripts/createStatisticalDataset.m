@@ -425,6 +425,26 @@ if exportToTable
     end
     
     statisticalData.operatorTable = struct2table(data);
+    % Ensure OperatorGroup is a categorical/text variable (not coerced to numeric)
+    if ismember('OperatorGroup', statisticalData.operatorTable.Properties.VariableNames)
+        og = statisticalData.operatorTable.OperatorGroup;
+        % Convert cellstr or string to categorical
+        if iscell(og)
+            statisticalData.operatorTable.OperatorGroup = categorical(og);
+        elseif isstring(og)
+            statisticalData.operatorTable.OperatorGroup = categorical(cellstr(og));
+        elseif iscategorical(og)
+            % already categorical
+        else
+            % Fallback: make categorical from char array or other types
+            try
+                statisticalData.operatorTable.OperatorGroup = categorical(cellstr(og));
+            catch
+                % As a last resort, set to 'Other'
+                statisticalData.operatorTable.OperatorGroup = categorical(repmat({'Other'}, height(statisticalData.operatorTable), 1));
+            end
+        end
+    end
     
     catch ME
     if verbose
