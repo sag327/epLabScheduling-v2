@@ -215,6 +215,37 @@ for i = 1:numOperators
     
     %% EXTRACT FROM COMPREHENSIVE METRICS
     opMetrics = comprehensiveMetrics.(opName);
+
+    % Operator group label from analysis results (robust coercion)
+    if isfield(opMetrics, 'operatorGroup') && ~isempty(opMetrics.operatorGroup)
+        grp = opMetrics.operatorGroup;
+        try
+            if iscategorical(grp)
+                grp = string(grp);
+            end
+            if isstring(grp)
+                if ~ismissing(grp) && strlength(grp) > 0
+                    grp = char(grp);
+                else
+                    grp = 'Other';
+                end
+            elseif ~ischar(grp)
+                s = string(grp);
+                if ~ismissing(s) && strlength(s) > 0
+                    grp = char(s);
+                else
+                    grp = 'Other';
+                end
+            end
+        catch
+            grp = 'Other';
+        end
+        data.OperatorGroup{i} = grp;
+        operatorGroupNames{i} = grp;
+    else
+        data.OperatorGroup{i} = 'Other';
+        operatorGroupNames{i} = 'Other';
+    end
     
     % Basic working pattern metrics
     data.TotalCases(i) = getField(opMetrics, 'totalCases', 0);
