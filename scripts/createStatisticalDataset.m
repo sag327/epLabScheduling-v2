@@ -88,6 +88,7 @@ data = struct();
 % Primary identifiers
 data.OperatorName = cell(numOperators, 1);
 data.OperatorID = (1:numOperators)';
+data.OperatorGroup = cell(numOperators, 1); % categorical/group label (from hardcoded mapping)
 
 % Working pattern metrics
 data.TotalWorkingDays = zeros(numOperators, 1);
@@ -199,6 +200,9 @@ if verbose
     fprintf('Extracting metrics for each operator:\n');
 end
 
+% Collect operator group names for one-hot encoding after loop
+operatorGroupNames = cell(numOperators, 1);
+
 for i = 1:numOperators
     opName = operatorNames{i};
     
@@ -303,6 +307,20 @@ for i = 1:numOperators
         end
         
         data.(standardName)(i) = opMetrics.(fieldName);
+    end
+end
+
+% Create one-hot encoded group variables for multivariate analysis
+uniqueGroups = unique(string(operatorGroupNames));
+uniqueGroups = uniqueGroups(~ismissing(uniqueGroups) & uniqueGroups ~= "");
+for g = 1:length(uniqueGroups)
+    gName = char(uniqueGroups(g));
+    safeField = matlab.lang.makeValidName(['Group_' gName]);
+    data.(safeField) = zeros(numOperators, 1);
+    for i = 1:numOperators
+        if strcmpi(data.OperatorGroup{i}, gName)
+            data.(safeField)(i) = 1;
+        end
     end
 end
 
@@ -444,6 +462,7 @@ function descriptions = createVariableDescriptions(procedureTypes)
 descriptions = struct();
 descriptions.OperatorName = 'Name/identifier of the operator';
 descriptions.OperatorID = 'Numeric ID for the operator';
+descriptions.OperatorGroup = 'Operator group label (hardcoded mapping for multivariate analysis)';
 
 % Working pattern metrics
 descriptions.TotalWorkingDays = 'Total number of working days in dataset';
@@ -521,6 +540,15 @@ for proc = 1:length(procedureTypes)
     descriptions.([safeProcName '_MedianPost']) = sprintf('Median post time for %s (minutes)', procName);
 end
 
+% Add descriptions for group one-hot variables
+if exist('uniqueGroups','var') && ~isempty(uniqueGroups)
+    for g = 1:length(uniqueGroups)
+        gName = char(uniqueGroups(g));
+        safeField = matlab.lang.makeValidName(['Group_' gName]);
+        descriptions.(safeField) = sprintf('One-hot indicator for operator group: %s', gName);
+    end
+end
+
 end
 
 function summaryStats = calculateSummaryStatistics(data, verbose)
@@ -591,6 +619,14 @@ correlationMatrix.size = size(corrMatrix);
 if verbose
     fprintf('Correlation matrix calculated for %d numeric variables\n', length(numericFields));
 end
+    % Operator group label (string)
+    if isfield(opMetrics, 'operatorGroup') && ~isempty(opMetrics.operatorGroup)
+        data.OperatorGroup{i} = char(opMetrics.operatorGroup);
+        operatorGroupNames{i} = char(opMetrics.operatorGroup);
+    else
+        data.OperatorGroup{i} = '';
+        operatorGroupNames{i} = '';
+    end
 
 end
 

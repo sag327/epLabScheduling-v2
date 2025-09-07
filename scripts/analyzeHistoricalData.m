@@ -2024,6 +2024,9 @@ end
 % Initialize output structure
 comprehensiveMetrics = struct();
 
+% Operator group mapping (hardcoded). Edit getOperatorGroupMap() to maintain groups.
+operatorGroupMap = getOperatorGroupMap();
+
 % Get unique operators from historical data
 if isfield(historicalData, 'surgeon')
     allOperators = string(historicalData.surgeon);
@@ -2062,6 +2065,12 @@ for i = 1:numOperators
     % Initialize operator metrics
     opMetrics = struct();
     opMetrics.name = opName;
+    % Assign operator group (defaults to 'Unknown' if not mapped)
+    if isKey(operatorGroupMap, opName)
+        opMetrics.operatorGroup = operatorGroupMap(opName);
+    else
+        opMetrics.operatorGroup = 'Unknown';
+    end
     opMetrics.totalCases = length(opCases);
     
     %% BASIC WORKING PATTERN METRICS
@@ -2540,6 +2549,30 @@ for i = 1:numOperators
     
     % Store the operator metrics
     comprehensiveMetrics.(safeOpName) = opMetrics;
+end
+
+function operatorGroupMap = getOperatorGroupMap()
+% Returns a containers.Map mapping operator names to group labels.
+% Edit this mapping to reflect your institution's operator groupings.
+% Example:
+%   map('Doe, John MD') = 'EP Faculty';
+%   map('Smith, Jane MD') = 'Anesthesiology';
+%   map('Fellow, Alex MD') = 'EP Fellows';
+
+operatorGroupMap = containers.Map();
+
+% TODO: Populate with your actual operator-to-group assignments.
+% operatorGroupMap('Operator Name 1') = 'Group A';
+% operatorGroupMap('Operator Name 2') = 'Group B';
+% operatorGroupMap('Operator Name 3') = 'Group A';
+
+operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+
 end
 
 if showStats
