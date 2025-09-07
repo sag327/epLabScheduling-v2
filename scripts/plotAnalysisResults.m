@@ -3,6 +3,27 @@ function plotAnalysisResults(analysisResults, varargin)
 % Uses pre-calculated flip-to-turnover ratios and correlates with selected procedure metrics
 % Version: 2.2.0
 %
+% Available Plots and Metrics
+% - Operator bar charts (always rendered):
+%   - Proportion of turnovers that are flips by operator (% of turnovers)
+%   - Median idle time per turnover by operator (minutes per turnover)
+%
+% - Correlation plot (enable with 'CreateCorrelationPlot', true):
+%   - User selects a procedure and a procedure-time metric to correlate against flip-to-turnover ratio
+%   - Selectable procedure-time metrics per operator for the chosen procedure:
+%       'mean', 'median', 'std', 'min', 'max', 'p25', 'p75', 'p90'
+%
+% - Time series plot (enable with 'CreateTimeSeriesPlot', true):
+%   - Flip-to-turnover ratio over time by operator, plus overall average trend
+%
+% - Box plots (enable with 'CreateBoxPlots', true):
+%   - Distribution of operator flip-to-turnover ratios (%) and median idle time/turnover (minutes)
+%
+% - Daily department-wide scatter (enable with 'CreateDailyDeptScatter', true):
+%   - Daily overall department Idle/Turnover (min per turnover) vs:
+%       • Flip/Turnover (flips per turnover)
+%       • Average Concurrent Labs (includes setup + procedure + post times)
+%
 % Inputs:
 %   analysisResults - structure returned by analyzeHistoricalData
 %
