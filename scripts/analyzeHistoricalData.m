@@ -48,6 +48,16 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %     .scheduleAnalysis       - Schedule performance metrics (if schedules provided)
 %     .operatorAnalysis       - Operator workload and idle time (if schedules provided)
 %     .labFlipAnalysis        - Lab switching and flip statistics (if schedules provided)
+%       - scheduleAnalysis.dailyEfficiency:
+%           .byDate(date) with department-wide daily metrics across all labs/operators:
+%               overallDeptTotalOperatorIdleTimeDaily, overallDeptTotalTurnoversDaily,
+%               overallDeptIdleToTurnoverRatioDaily, overallDeptTotalLabFlipsDaily,
+%               overallDeptFlipToTurnoverRatioDaily, overallDeptMakespanDaily,
+%               overallDeptTotalRoomBusyTimeDaily (setup+proc+post),
+%               overallDeptAvgConcurrentLabsDaily, overallDeptNumLabsActiveDaily
+%           .summary with means/stds and correlations:
+%               mean/std of idleToTurnover, flipToTurnover, avgConcurrentLabs; and
+%               corrIdle_vs_FlipTurnover, corrIdle_vs_AvgConcurrentLabs (pearson/spearman)
 %
 %   Also displays analysis summary if ShowStats is true
 %
@@ -435,6 +445,12 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     operatorWorkTimeStats = containers.Map();
     dailyLabFlips = zeros(1, numSchedules);
     
+    % Department-wide daily efficiency collectors
+    dailyEfficiencyMap = containers.Map();
+    dailyIdleToTurnoverList = NaN(1, numSchedules);
+    dailyFlipToTurnoverList = NaN(1, numSchedules);
+    dailyAvgConcurrentLabsList = NaN(1, numSchedules);
+    
     % Get all unique operators across all schedules for consistent arrays
     allOperators = {};
     for i = 1:numSchedules
@@ -491,6 +507,83 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             
             % Store daily lab flips for this date
             dailyLabFlips(i) = dayLabFlipsCount;
+
+            % --- Department-wide daily efficiency metrics (overallDept, per-day) ---
+            % Sum operator idle minutes across operators
+            totalOperatorIdle = 0;
+            try
+                idleVals = values(dayIdleStats);
+                if ~isempty(idleVals)
+                    totalOperatorIdle = sum(cell2mat(idleVals));
+                end
+            catch
+                totalOperatorIdle = 0;
+            end
+
+            % Compute turnovers, room busy time (setup+proc+post), active labs, and fallback makespan bounds
+            totalTurnovers = 0;
+            totalRoomBusyTime = 0;
+            numLabsActive = 0;
+            earliestStart = inf;
+            latestEnd = -inf;
+            if isfield(schedule, 'labs') && ~isempty(schedule.labs)
+                for labIdx = 1:length(schedule.labs)
+                    labCases = schedule.labs{labIdx};
+                    if ~isempty(labCases)
+                        numLabsActive = numLabsActive + 1;
+                        totalTurnovers = totalTurnovers + max(length(labCases) - 1, 0);
+                        for c = 1:length(labCases)
+                            if isfield(labCases(c), 'startTime') && isfield(labCases(c), 'endTime')
+                                totalRoomBusyTime = totalRoomBusyTime + max(labCases(c).endTime - labCases(c).startTime, 0);
+                                earliestStart = min(earliestStart, labCases(c).startTime);
+                                latestEnd = max(latestEnd, labCases(c).endTime);
+                            end
+                        end
+                    end
+                end
+            end
+
+            % Prefer recorded makespan; fallback to computed span if needed
+            makespanDay = NaN;
+            if isfield(results, 'makespan') && ~isempty(results.makespan)
+                makespanDay = results.makespan;
+            elseif isfinite(earliestStart) && isfinite(latestEnd) && latestEnd > earliestStart
+                makespanDay = latestEnd - earliestStart;
+            end
+
+            % Ratios (NaN when turnovers = 0)
+            if totalTurnovers > 0
+                idleToTurnover = totalOperatorIdle / totalTurnovers;
+                flipToTurnover = dayLabFlipsCount / totalTurnovers;
+            else
+                idleToTurnover = NaN;
+                flipToTurnover = NaN;
+            end
+
+            % Avg concurrent labs includes setup+proc+post
+            if ~isnan(makespanDay) && makespanDay > 0
+                avgConcurrentLabs = totalRoomBusyTime / makespanDay;
+            else
+                avgConcurrentLabs = NaN;
+            end
+
+            % Persist daily overall department metrics
+            dayEff = struct();
+            dayEff.overallDeptTotalOperatorIdleTimeDaily = totalOperatorIdle;
+            dayEff.overallDeptTotalTurnoversDaily = totalTurnovers;
+            dayEff.overallDeptIdleToTurnoverRatioDaily = idleToTurnover;
+            dayEff.overallDeptTotalLabFlipsDaily = dayLabFlipsCount;
+            dayEff.overallDeptFlipToTurnoverRatioDaily = flipToTurnover;
+            dayEff.overallDeptMakespanDaily = makespanDay;
+            dayEff.overallDeptTotalRoomBusyTimeDaily = totalRoomBusyTime;
+            dayEff.overallDeptAvgConcurrentLabsDaily = avgConcurrentLabs;
+            dayEff.overallDeptNumLabsActiveDaily = numLabsActive;
+            dailyEfficiencyMap(scheduleKey) = dayEff;
+
+            % Collect for summary/correlation
+            dailyIdleToTurnoverList(i) = idleToTurnover;
+            dailyFlipToTurnoverList(i) = flipToTurnover;
+            dailyAvgConcurrentLabsList(i) = avgConcurrentLabs;
             
             % Update statistics for operators active on this day
             activeOperators = keys(schedule.operators);
@@ -598,6 +691,75 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     
     % Calculate lab efficiency summary statistics
     scheduleAnalysis.labEfficiencySummary = calculateLabEfficiencySummary(allLabUtilizations, allMakespans, scheduleKeys, historicalSchedules);
+
+    % Department-wide daily efficiency summary and attachment
+    dailySummary = struct();
+    dailySummary.nDays = numSchedules;
+    validIdle = isfinite(dailyIdleToTurnoverList);
+    validFlip = isfinite(dailyFlipToTurnoverList);
+    validConc = isfinite(dailyAvgConcurrentLabsList);
+    dailySummary.nDaysWithTurnovers = sum(validIdle);
+
+    if any(validIdle)
+        v = dailyIdleToTurnoverList(validIdle);
+        dailySummary.meanIdleToTurnover = mean(v);
+        dailySummary.stdIdleToTurnover = std(v);
+    else
+        dailySummary.meanIdleToTurnover = NaN;
+        dailySummary.stdIdleToTurnover = NaN;
+    end
+    if any(validFlip)
+        v = dailyFlipToTurnoverList(validFlip);
+        dailySummary.meanFlipToTurnover = mean(v);
+        dailySummary.stdFlipToTurnover = std(v);
+    else
+        dailySummary.meanFlipToTurnover = NaN;
+        dailySummary.stdFlipToTurnover = NaN;
+    end
+    if any(validConc)
+        v = dailyAvgConcurrentLabsList(validConc);
+        dailySummary.meanAvgConcurrentLabs = mean(v);
+        dailySummary.stdAvgConcurrentLabs = std(v);
+    else
+        dailySummary.meanAvgConcurrentLabs = NaN;
+        dailySummary.stdAvgConcurrentLabs = NaN;
+    end
+
+    % Correlations
+    mask1 = isfinite(dailyIdleToTurnoverList) & isfinite(dailyFlipToTurnoverList);
+    if sum(mask1) >= 2
+        x = dailyIdleToTurnoverList(mask1)'; y = dailyFlipToTurnoverList(mask1)';
+        [rP, pP] = corr(x, y, 'Type', 'Pearson');
+        [rS, pS] = corr(x, y, 'Type', 'Spearman');
+        dailySummary.corrIdle_vs_FlipTurnover = struct('pearson_r', rP, 'pearson_p', pP, 'spearman_r', rS, 'spearman_p', pS);
+    else
+        dailySummary.corrIdle_vs_FlipTurnover = struct('pearson_r', NaN, 'pearson_p', NaN, 'spearman_r', NaN, 'spearman_p', NaN);
+    end
+    mask2 = isfinite(dailyIdleToTurnoverList) & isfinite(dailyAvgConcurrentLabsList);
+    if sum(mask2) >= 2
+        x = dailyIdleToTurnoverList(mask2)'; y = dailyAvgConcurrentLabsList(mask2)';
+        [rP, pP] = corr(x, y, 'Type', 'Pearson');
+        [rS, pS] = corr(x, y, 'Type', 'Spearman');
+        dailySummary.corrIdle_vs_AvgConcurrentLabs = struct('pearson_r', rP, 'pearson_p', pP, 'spearman_r', rS, 'spearman_p', pS);
+    else
+        dailySummary.corrIdle_vs_AvgConcurrentLabs = struct('pearson_r', NaN, 'pearson_p', NaN, 'spearman_r', NaN, 'spearman_p', NaN);
+    end
+
+    scheduleAnalysis.dailyEfficiency = struct();
+    scheduleAnalysis.dailyEfficiency.byDate = dailyEfficiencyMap;
+    scheduleAnalysis.dailyEfficiency.summary = dailySummary;
+
+    if showStats
+        fprintf('\n--- Daily Department Efficiency Summary ---\n');
+        fprintf('  Days analyzed: %d (with turnovers: %d)\n', dailySummary.nDays, dailySummary.nDaysWithTurnovers);
+        fprintf('  Idle/Turnover (min/turnover): mean %.2f, std %.2f\n', dailySummary.meanIdleToTurnover, dailySummary.stdIdleToTurnover);
+        fprintf('  Flip/Turnover: mean %.2f, std %.2f\n', dailySummary.meanFlipToTurnover, dailySummary.stdFlipToTurnover);
+        fprintf('  Avg concurrent labs (setup+proc+post): mean %.2f, std %.2f\n', dailySummary.meanAvgConcurrentLabs, dailySummary.stdAvgConcurrentLabs);
+        ci = dailySummary.corrIdle_vs_FlipTurnover;
+        fprintf('  Corr Idle vs Flip/Turnover: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', ci.pearson_r, ci.pearson_p, ci.spearman_r, ci.spearman_p);
+        cj = dailySummary.corrIdle_vs_AvgConcurrentLabs;
+        fprintf('  Corr Idle vs Avg Concurrent Labs: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', cj.pearson_r, cj.pearson_p, cj.spearman_r, cj.spearman_p);
+    end
     
     labFlipAnalysis.operatorFlipStats = operatorFlipStats;
     labFlipAnalysis.dailyLabFlips = dailyLabFlips;
