@@ -849,18 +849,18 @@ if sum(mask2) >= 2
 end
 hold off;
 
-% Subplot 3: Flip/Turnover vs Makespan
+% Subplot 3: Flip/Turnover vs Makespan (Makespan on Y-axis)
 subplot(2,3,3);
 mask3 = isfinite(flipPerTurn) & isfinite(makespan);
-scatter(makespan(mask3), flipPerTurn(mask3), 50, 'filled');
+scatter(flipPerTurn(mask3), makespan(mask3), 50, 'filled');
 grid on;
-xlabel('Makespan (minutes)');
-ylabel('Flip/Turnover (flips per turnover)');
+xlabel('Flip/Turnover (flips per turnover)');
+ylabel('Makespan (minutes)');
 title('Daily: Flip/Turnover vs Makespan');
 hold on;
 if sum(mask3) >= 2
-    x = makespan(mask3);
-    y = flipPerTurn(mask3);
+    x = flipPerTurn(mask3);
+    y = makespan(mask3);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -871,18 +871,18 @@ if sum(mask3) >= 2
 end
 hold off;
 
-% Subplot 4: Avg Concurrent Labs vs Makespan
+% Subplot 4: Avg Concurrent Labs vs Makespan (Makespan on Y-axis)
 subplot(2,3,4);
 mask4 = isfinite(avgConcurrent) & isfinite(makespan);
-scatter(makespan(mask4), avgConcurrent(mask4), 50, 'filled');
+scatter(avgConcurrent(mask4), makespan(mask4), 50, 'filled');
 grid on;
-xlabel('Makespan (minutes)');
-ylabel('Average Concurrent Labs (setup+proc+post)');
+xlabel('Average Concurrent Labs (setup+proc+post)');
+ylabel('Makespan (minutes)');
 title('Daily: Avg Concurrent Labs vs Makespan');
 hold on;
 if sum(mask4) >= 2
-    x = makespan(mask4);
-    y = avgConcurrent(mask4);
+    x = avgConcurrent(mask4);
+    y = makespan(mask4);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
