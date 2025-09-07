@@ -805,9 +805,15 @@ end
 
 figure('Position', [100, 100, 1600, 900]);
 
+% Exclude outlier days: average concurrent labs < 3 (applies to all subplots)
+baseMask = isfinite(avgConcurrent) & avgConcurrent >= 3;
+excludedCount = sum(isfinite(avgConcurrent) & avgConcurrent < 3);
+includedCount = sum(baseMask);
+totalCount = numDays;
+
 % Subplot 1: Idle/Turnover vs Flip/Turnover
 subplot(2,3,1);
-mask1 = isfinite(idlePerTurn) & isfinite(flipPerTurn);
+mask1 = baseMask & isfinite(idlePerTurn) & isfinite(flipPerTurn);
 scatter(flipPerTurn(mask1), idlePerTurn(mask1), 50, 'filled');
 grid on;
 xlabel('Flip/Turnover (flips per turnover)');
@@ -829,7 +835,7 @@ hold off;
 
 % Subplot 2: Idle/Turnover vs Avg Concurrent Labs
 subplot(2,3,2);
-mask2 = isfinite(idlePerTurn) & isfinite(avgConcurrent);
+mask2 = baseMask & isfinite(idlePerTurn) & isfinite(avgConcurrent);
 scatter(avgConcurrent(mask2), idlePerTurn(mask2), 50, 'filled');
 grid on;
 xlabel('Average Concurrent Labs (setup+proc+post)');
@@ -851,7 +857,7 @@ hold off;
 
 % Subplot 3: Flip/Turnover vs Makespan (Makespan on Y-axis)
 subplot(2,3,3);
-mask3 = isfinite(flipPerTurn) & isfinite(makespan);
+mask3 = baseMask & isfinite(flipPerTurn) & isfinite(makespan);
 scatter(flipPerTurn(mask3), makespan(mask3), 50, 'filled');
 grid on;
 xlabel('Flip/Turnover (flips per turnover)');
@@ -873,7 +879,7 @@ hold off;
 
 % Subplot 4: Avg Concurrent Labs vs Makespan (Makespan on Y-axis)
 subplot(2,3,4);
-mask4 = isfinite(avgConcurrent) & isfinite(makespan);
+mask4 = baseMask & isfinite(avgConcurrent) & isfinite(makespan);
 scatter(avgConcurrent(mask4), makespan(mask4), 50, 'filled');
 grid on;
 xlabel('Average Concurrent Labs (setup+proc+post)');
@@ -895,7 +901,7 @@ hold off;
 
 % Subplot 5: Avg Concurrent Labs vs Flip/Turnover
 subplot(2,3,5);
-mask5 = isfinite(avgConcurrent) & isfinite(flipPerTurn);
+mask5 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
 scatter(flipPerTurn(mask5), avgConcurrent(mask5), 50, 'filled');
 grid on;
 xlabel('Flip/Turnover (flips per turnover)');
@@ -915,7 +921,13 @@ if sum(mask5) >= 2
 end
 hold off;
 
+% Add note about excluded days to the figure
+annotation('textbox', [0.50, 0.93, 0.48, 0.06], 'String', ...
+    sprintf('Excluding %d outlier day(s) with Average Concurrent Labs < 3 (included %d of %d)', excludedCount, includedCount, totalCount), ...
+    'HorizontalAlignment', 'right', 'VerticalAlignment', 'middle', 'EdgeColor', 'none', 'FontSize', 10);
+
 fprintf(['Daily dept scatter plots created for %d days.\n' ...
+         '  Excluded %d day(s) with avg concurrent labs < 3. Included %d day(s).\n' ...
          '  Plotted pairs counts: mask1=%d, mask2=%d, mask3=%d, mask4=%d, mask5=%d.\n'], ...
-        numDays, sum(mask1), sum(mask2), sum(mask3), sum(mask4), sum(mask5));
+        numDays, excludedCount, includedCount, sum(mask1), sum(mask2), sum(mask3), sum(mask4), sum(mask5));
 end
