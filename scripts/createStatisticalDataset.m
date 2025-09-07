@@ -310,6 +310,31 @@ for i = 1:numOperators
     end
 end
 
+% Sanitize OperatorGroup values to avoid empty numeric cells (ensure text labels)
+for i = 1:numOperators
+    g = data.OperatorGroup{i};
+    if isstring(g)
+        if ismissing(g) || strlength(g) == 0
+            data.OperatorGroup{i} = 'Other';
+        else
+            data.OperatorGroup{i} = char(g);
+        end
+    elseif ischar(g)
+        if isempty(g)
+            data.OperatorGroup{i} = 'Other';
+        end
+    elseif iscategorical(g)
+        if isundefined(g)
+            data.OperatorGroup{i} = 'Other';
+        else
+            data.OperatorGroup{i} = char(string(g));
+        end
+    else
+        % Any non-text type defaults to 'Other'
+        data.OperatorGroup{i} = 'Other';
+    end
+end
+
 % Create one-hot encoded group variables for multivariate analysis
 % Normalize group names defensively to avoid string conversion errors
 cleanGroups = cell(numOperators, 1);
