@@ -10,6 +10,7 @@ function plotAnalysisResults(analysisResults, varargin)
 %   'CreateCorrelationPlot' - logical, create correlation plot (default: false)
 %   'CreateTimeSeriesPlot'  - logical, create time series plot (default: false)
 %   'CreateBoxPlots'        - logical, create box and whisker plots (default: false)
+%   'CreateDailyDeptScatter' - logical, plot daily dept idle/turnover vs flip/turnover and avg concurrent labs (default: false)
 %   'SelectedProcedure'     - string, procedure for correlation (default: auto-select)
 %   'SelectedMetric'        - string, metric for correlation (default: auto-select)
 %
@@ -24,6 +25,7 @@ p = inputParser();
 addParameter(p, 'CreateCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
 addParameter(p, 'CreateBoxPlots', false, @islogical);
+addParameter(p, 'CreateDailyDeptScatter', false, @islogical);
 addParameter(p, 'SelectedProcedure', '', @ischar);
 addParameter(p, 'SelectedMetric', '', @ischar);
 parse(p, varargin{:});
@@ -31,6 +33,7 @@ parse(p, varargin{:});
 createCorrelationPlot = p.Results.CreateCorrelationPlot;
 createTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
 createBoxPlots = p.Results.CreateBoxPlots;
+createDailyDeptScatter = p.Results.CreateDailyDeptScatter;
 selectedProcedure = p.Results.SelectedProcedure;
 selectedMetric = p.Results.SelectedMetric;
 
@@ -189,6 +192,11 @@ if createBoxPlots
     createBoxPlotsForMetrics(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators);
 end
 
+% Create daily department-wide scatter plots if requested
+if createDailyDeptScatter
+    createDailyDeptScatterPlots(analysisResults);
+end
+
 fprintf('Charts created with %d operators\n', length(validOperators));
 end
 
@@ -206,6 +214,92 @@ selectedMetric = '';
 if ~isfield(analysisResults, 'procedureTimeByOperator')
     msgbox('No procedure-by-operator data available for correlation analysis.', 'Error', 'error');
     return;
+end
+
+function createDailyDeptScatterPlots(analysisResults)
+% Plot per-day department-wide idle/turnover vs (flip/turnover and avg concurrent labs)
+
+% Validate presence of daily efficiency results
+if ~isfield(analysisResults, 'scheduleAnalysis') || ...
+   ~isfield(analysisResults.scheduleAnalysis, 'dailyEfficiency') || ...
+   isempty(analysisResults.scheduleAnalysis.dailyEfficiency)
+    warning('Daily department-wide efficiency metrics not available. Run analyzeHistoricalData with HistoricalSchedules.');
+    return;
+end
+
+dailyEff = analysisResults.scheduleAnalysis.dailyEfficiency;
+if ~isfield(dailyEff, 'byDate') || isempty(dailyEff.byDate)
+    warning('No daily efficiency entries found.');
+    return;
+end
+
+dateKeys = keys(dailyEff.byDate);
+numDays = length(dateKeys);
+
+idlePerTurn = NaN(numDays,1);
+flipPerTurn = NaN(numDays,1);
+avgConcurrent = NaN(numDays,1);
+
+for i = 1:numDays
+    d = dailyEff.byDate(dateKeys{i});
+    if isfield(d, 'overallDeptIdleToTurnoverRatioDaily')
+        idlePerTurn(i) = d.overallDeptIdleToTurnoverRatioDaily;
+    end
+    if isfield(d, 'overallDeptFlipToTurnoverRatioDaily')
+        flipPerTurn(i) = d.overallDeptFlipToTurnoverRatioDaily;
+    end
+    if isfield(d, 'overallDeptAvgConcurrentLabsDaily')
+        avgConcurrent(i) = d.overallDeptAvgConcurrentLabsDaily;
+    end
+end
+
+figure('Position', [150, 150, 1400, 600]);
+
+% Subplot 1: Idle/Turnover vs Flip/Turnover
+subplot(1,2,1);
+mask1 = isfinite(idlePerTurn) & isfinite(flipPerTurn);
+scatter(flipPerTurn(mask1), idlePerTurn(mask1), 50, 'filled');
+grid on;
+xlabel('Flip/Turnover (flips per turnover)');
+ylabel('Idle/Turnover (minutes per turnover)');
+title('Daily: Idle/Turnover vs Flip/Turnover');
+hold on;
+if sum(mask1) >= 2
+    x = flipPerTurn(mask1);
+    y = idlePerTurn(mask1);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot 2: Idle/Turnover vs Avg Concurrent Labs
+subplot(1,2,2);
+mask2 = isfinite(idlePerTurn) & isfinite(avgConcurrent);
+scatter(avgConcurrent(mask2), idlePerTurn(mask2), 50, 'filled');
+grid on;
+xlabel('Average Concurrent Labs (setup+proc+post)');
+ylabel('Idle/Turnover (minutes per turnover)');
+title('Daily: Idle/Turnover vs Avg Concurrent Labs');
+hold on;
+if sum(mask2) >= 2
+    x = avgConcurrent(mask2);
+    y = idlePerTurn(mask2);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+fprintf('Daily dept scatter plots created for %d days (mask1=%d, mask2=%d).\n', numDays, sum(mask1), sum(mask2));
 end
 
 % Collect all unique procedure names
@@ -672,11 +766,12 @@ end
 
 % Create first box plot: Flip-to-Turnover Ratios
 figure('Position', [300, 300, 800, 600]);
-boxplot(flipsPerTurnoverRatio);
-title('Distribution of Flip-to-Turnover Ratios (Multi-Procedure Days Only)');
-ylabel('% of Turnovers that are Flips');
-xlabel('All Operators');
-grid on;
+boxplot(flipsPerTurnoverRatio,'Colors','k');
+ylabel('average flip/turnover (%)');
+xlabel('');
+set(gca,'XTickLabel','all operators');
+grid off;
+ylim([0 100]);
 
 % Add summary statistics as text
 stats1 = struct();
@@ -686,18 +781,25 @@ stats1.std = std(flipsPerTurnoverRatio);
 stats1.min = min(flipsPerTurnoverRatio);
 stats1.max = max(flipsPerTurnoverRatio);
 
-text(0.98, 0.98, sprintf('Mean: %.1f%%\nMedian: %.1f%%\nStd: %.1f%%\nRange: %.1f%% - %.1f%%\nn = %d', ...
+box off;
+t1 = text(0.98, 0.98, sprintf('Mean: %.1f%%\nMedian: %.1f%%\nStd: %.1f%%\nRange: %.1f%% - %.1f%%\nn = %d', ...
     stats1.mean, stats1.median, stats1.std, stats1.min, stats1.max, length(flipsPerTurnoverRatio)), ...
     'Units', 'normalized', 'VerticalAlignment', 'top', 'HorizontalAlignment', 'right', 'FontSize', 10, ...
     'BackgroundColor', 'white', 'EdgeColor', 'black');
+t1.Position = [1.75 0.98];
+beautifyBoxPlot(gcf,gca,[2 4]);
+
 
 % Create second box plot: Idle Time per Turnover
 figure('Position', [400, 400, 800, 600]);
-boxplot(medianIdleTimeToTurnoverRatio);
-title('Distribution of Median Idle Time per Turnover (Multi-Procedure Days Only)');
-ylabel('Median Idle Time per Turnover (minutes)');
-xlabel('All Operators');
-grid on;
+boxplot(medianIdleTimeToTurnoverRatio,'Colors','k');
+ylabel('median idle time/turnover (min)')
+xlabel('');
+set(gca,'XTickLabel','all operators');
+grid off;
+yl = ylim;
+ylim([0 max(100, yl(2))]);
+
 
 % Add summary statistics as text
 stats2 = struct();
@@ -707,10 +809,14 @@ stats2.std = std(medianIdleTimeToTurnoverRatio);
 stats2.min = min(medianIdleTimeToTurnoverRatio);
 stats2.max = max(medianIdleTimeToTurnoverRatio);
 
-text(0.98, 0.98, sprintf('Mean: %.1f min\nMedian: %.1f min\nStd: %.1f min\nRange: %.1f - %.1f min\nn = %d', ...
+box off;
+t2 = text(0.98, 0.98, sprintf('Mean: %.1f min\nMedian: %.1f min\nStd: %.1f min\nRange: %.1f - %.1f min\nn = %d', ...
     stats2.mean, stats2.median, stats2.std, stats2.min, stats2.max, length(medianIdleTimeToTurnoverRatio)), ...
     'Units', 'normalized', 'VerticalAlignment', 'top', 'HorizontalAlignment', 'right', 'FontSize', 10, ...
     'BackgroundColor', 'white', 'EdgeColor', 'black');
+t2.Position = [1.75 0.98];
+beautifyBoxPlot(gcf,gca,[2 4]);
+
 
 fprintf('Box plots created showing distribution of metrics across %d operators\n', length(validOperators));
 end
