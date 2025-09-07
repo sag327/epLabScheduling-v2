@@ -758,7 +758,12 @@ fprintf('Box plots created showing distribution of metrics across %d operators\n
 end
 
 function createDailyDeptScatterPlots(analysisResults)
-% Plot per-day department-wide idle/turnover vs (flip/turnover and avg concurrent labs)
+% Plot per-day department-wide daily efficiency relationships:
+% - Idle/Turnover vs Flip/Turnover
+% - Idle/Turnover vs Avg Concurrent Labs
+% - Flip/Turnover vs Makespan
+% - Avg Concurrent Labs vs Makespan
+% - Avg Concurrent Labs vs Flip/Turnover
 
 % Validate presence of daily efficiency results
 if ~isfield(analysisResults, 'scheduleAnalysis') || ...
@@ -780,6 +785,7 @@ numDays = length(dateKeys);
 idlePerTurn = NaN(numDays,1);
 flipPerTurn = NaN(numDays,1);
 avgConcurrent = NaN(numDays,1);
+makespan = NaN(numDays,1);
 
 for i = 1:numDays
     d = dailyEff.byDate(dateKeys{i});
@@ -792,12 +798,15 @@ for i = 1:numDays
     if isfield(d, 'overallDeptAvgConcurrentLabsDaily')
         avgConcurrent(i) = d.overallDeptAvgConcurrentLabsDaily;
     end
+    if isfield(d, 'overallDeptMakespanDaily')
+        makespan(i) = d.overallDeptMakespanDaily;
+    end
 end
 
-figure('Position', [150, 150, 1400, 600]);
+figure('Position', [100, 100, 1600, 900]);
 
 % Subplot 1: Idle/Turnover vs Flip/Turnover
-subplot(1,2,1);
+subplot(2,3,1);
 mask1 = isfinite(idlePerTurn) & isfinite(flipPerTurn);
 scatter(flipPerTurn(mask1), idlePerTurn(mask1), 50, 'filled');
 grid on;
@@ -819,7 +828,7 @@ end
 hold off;
 
 % Subplot 2: Idle/Turnover vs Avg Concurrent Labs
-subplot(1,2,2);
+subplot(2,3,2);
 mask2 = isfinite(idlePerTurn) & isfinite(avgConcurrent);
 scatter(avgConcurrent(mask2), idlePerTurn(mask2), 50, 'filled');
 grid on;
@@ -840,5 +849,73 @@ if sum(mask2) >= 2
 end
 hold off;
 
-fprintf('Daily dept scatter plots created for %d days (mask1=%d, mask2=%d).\n', numDays, sum(mask1), sum(mask2));
+% Subplot 3: Flip/Turnover vs Makespan
+subplot(2,3,3);
+mask3 = isfinite(flipPerTurn) & isfinite(makespan);
+scatter(makespan(mask3), flipPerTurn(mask3), 50, 'filled');
+grid on;
+xlabel('Makespan (minutes)');
+ylabel('Flip/Turnover (flips per turnover)');
+title('Daily: Flip/Turnover vs Makespan');
+hold on;
+if sum(mask3) >= 2
+    x = makespan(mask3);
+    y = flipPerTurn(mask3);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot 4: Avg Concurrent Labs vs Makespan
+subplot(2,3,4);
+mask4 = isfinite(avgConcurrent) & isfinite(makespan);
+scatter(makespan(mask4), avgConcurrent(mask4), 50, 'filled');
+grid on;
+xlabel('Makespan (minutes)');
+ylabel('Average Concurrent Labs (setup+proc+post)');
+title('Daily: Avg Concurrent Labs vs Makespan');
+hold on;
+if sum(mask4) >= 2
+    x = makespan(mask4);
+    y = avgConcurrent(mask4);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot 5: Avg Concurrent Labs vs Flip/Turnover
+subplot(2,3,5);
+mask5 = isfinite(avgConcurrent) & isfinite(flipPerTurn);
+scatter(flipPerTurn(mask5), avgConcurrent(mask5), 50, 'filled');
+grid on;
+xlabel('Flip/Turnover (flips per turnover)');
+ylabel('Average Concurrent Labs (setup+proc+post)');
+title('Daily: Avg Concurrent Labs vs Flip/Turnover');
+hold on;
+if sum(mask5) >= 2
+    x = flipPerTurn(mask5);
+    y = avgConcurrent(mask5);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+fprintf(['Daily dept scatter plots created for %d days.\n' ...
+         '  Plotted pairs counts: mask1=%d, mask2=%d, mask3=%d, mask4=%d, mask5=%d.\n'], ...
+        numDays, sum(mask1), sum(mask2), sum(mask3), sum(mask4), sum(mask5));
 end
