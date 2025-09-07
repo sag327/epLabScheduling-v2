@@ -311,7 +311,39 @@ for i = 1:numOperators
 end
 
 % Create one-hot encoded group variables for multivariate analysis
-uniqueGroups = unique(string(operatorGroupNames));
+% Normalize group names defensively to avoid string conversion errors
+cleanGroups = cell(numOperators, 1);
+for i = 1:numOperators
+    g = operatorGroupNames{i};
+    try
+        if isstring(g)
+            gs = strtrim(g);
+            if strlength(gs) == 0
+                cleanGroups{i} = 'Other';
+            else
+                cleanGroups{i} = char(gs);
+            end
+        elseif ischar(g)
+            if isempty(strtrim(g))
+                cleanGroups{i} = 'Other';
+            else
+                cleanGroups{i} = strtrim(g);
+            end
+        else
+            % Attempt conversion; fallback to 'Other' on failure
+            gs = string(g);
+            if ismissing(gs) || strlength(gs) == 0
+                cleanGroups{i} = 'Other';
+            else
+                cleanGroups{i} = char(gs);
+            end
+        end
+    catch
+        cleanGroups{i} = 'Other';
+    end
+end
+
+uniqueGroups = unique(string(cleanGroups));
 uniqueGroups = uniqueGroups(~ismissing(uniqueGroups) & uniqueGroups ~= "");
 for g = 1:length(uniqueGroups)
     gName = char(uniqueGroups(g));
