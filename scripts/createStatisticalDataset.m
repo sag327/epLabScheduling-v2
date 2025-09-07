@@ -462,7 +462,7 @@ function descriptions = createVariableDescriptions(procedureTypes)
 descriptions = struct();
 descriptions.OperatorName = 'Name/identifier of the operator';
 descriptions.OperatorID = 'Numeric ID for the operator';
-descriptions.OperatorGroup = 'Operator group label (hardcoded mapping for multivariate analysis)';
+descriptions.OperatorGroup = 'Operator group label (hardcoded mapping; default "Other")';
 
 % Working pattern metrics
 descriptions.TotalWorkingDays = 'Total number of working days in dataset';
@@ -624,8 +624,8 @@ end
         data.OperatorGroup{i} = char(opMetrics.operatorGroup);
         operatorGroupNames{i} = char(opMetrics.operatorGroup);
     else
-        data.OperatorGroup{i} = '';
-        operatorGroupNames{i} = '';
+        data.OperatorGroup{i} = 'Other';
+        operatorGroupNames{i} = 'Other';
     end
 
 end

@@ -2065,11 +2065,11 @@ for i = 1:numOperators
     % Initialize operator metrics
     opMetrics = struct();
     opMetrics.name = opName;
-    % Assign operator group (defaults to 'Unknown' if not mapped)
+    % Assign operator group (defaults to 'Other' if not mapped)
     if isKey(operatorGroupMap, opName)
         opMetrics.operatorGroup = operatorGroupMap(opName);
     else
-        opMetrics.operatorGroup = 'Unknown';
+        opMetrics.operatorGroup = 'Other';
     end
     opMetrics.totalCases = length(opCases);
     
@@ -2567,11 +2567,30 @@ operatorGroupMap = containers.Map();
 % operatorGroupMap('Operator Name 3') = 'Group A';
 
 operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
-operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
-operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
-operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
-operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
-operatorGroupMap('GAETA, STEPHEN A') = 'IMG';
+operatorGroupMap('HELD, ELIZABETH') = 'IMG';
+operatorGroupMap('KUMAR, VINEET') = 'IMG';
+operatorGroupMap('ATWATER, BRETT D') = 'IMG';
+operatorGroupMap('YANG, EUNICE') = 'IMG';
+operatorGroupMap('HOLLIS, ZACHARY T') = 'IMG';
+operatorGroupMap('WISH, MARC') = 'IMG';
+operatorGroupMap('ILKHANOFF, LEONARD') = 'IMG';
+
+operatorGroupMap('RASHID, HAROON') = 'VH';
+operatorGroupMap('FEIN, ADAM S') = 'VH';
+operatorGroupMap('MCSWAIN, ROBERT L') = 'VH';
+operatorGroupMap('LEE, JAE I') = 'VH';
+operatorGroupMap('SANDESARA, CHIRAG M') = 'VH';
+operatorGroupMap('DUC, JAMES') = 'VH';
+
+operatorGroupMap('ARSHAD, AYSHA') = 'Carient';
+operatorGroupMap('LEE, JOSEPH C') = 'Carient';
+
+operatorGroupMap('COHEN, MITCHELL I') = 'Peds';
+operatorGroupMap('PRZYBYLSKI, ROBERT G') = 'Peds';
+
+operatorGroupMap('MONIREDDIN GHAZVINI, MOHAMMAD') = 'Community EP';
+operatorGroupMap('KABADI, RAJIV A') = 'Medstar';
+operatorGroupMap('STROUSE, DAVID A') = 'Medstar';
 
 end
 
