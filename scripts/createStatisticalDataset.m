@@ -475,12 +475,33 @@ if exportToCSV
     fprintf('Exporting to CSV file: %s\n', outputFile);
     end
     
-    if exportToTable && isfield(statisticalData, 'operatorTable')
-    writetable(statisticalData.operatorTable, outputFile);
+    % Prefer writing the prepared operatorTable if it exists and is a table
+    if exportToTable && isfield(statisticalData, 'operatorTable') && istable(statisticalData.operatorTable)
+        writetable(statisticalData.operatorTable, outputFile);
     else
-    % Convert struct to table for CSV export
-    tempTable = struct2table(data);
-    writetable(tempTable, outputFile);
+        % Convert struct to table for CSV export (robust fallback)
+        try
+            tempTable = struct2table(data);
+            % Ensure OperatorGroup is categorical/text for export
+            if ismember('OperatorGroup', tempTable.Properties.VariableNames)
+                og = tempTable.OperatorGroup;
+                if iscell(og)
+                    tempTable.OperatorGroup = categorical(og);
+                elseif isstring(og)
+                    tempTable.OperatorGroup = categorical(cellstr(og));
+                elseif ~iscategorical(og)
+                    tempTable.OperatorGroup = categorical(repmat({'Other'}, height(tempTable), 1));
+                end
+            end
+            writetable(tempTable, outputFile);
+        catch ME
+            warning('Falling back to writestruct for export due to: %s', ME.message);
+            try
+                writestruct(data, outputFile);
+            catch ME2
+                error('Failed to export dataset: %s', ME2.message);
+            end
+        end
     end
     
     statisticalData.exportFiles{end+1} = outputFile;
