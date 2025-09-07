@@ -497,7 +497,13 @@ if exportToCSV
         catch ME
             warning('Falling back to writestruct for export due to: %s', ME.message);
             try
-                writestruct(data, outputFile);
+                % writestruct requires JSON or XML; switch to JSON alongside CSV base name
+                [outDir, outName, ~] = fileparts(outputFile);
+                if isempty(outDir); outDir = pwd; end
+                jsonFile = fullfile(outDir, [outName '.json']);
+                writestruct(data, jsonFile, 'FileType', 'json');
+                % Update outputFile to reflect actual exported file
+                outputFile = jsonFile;
             catch ME2
                 error('Failed to export dataset: %s', ME2.message);
             end
