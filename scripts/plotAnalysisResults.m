@@ -889,40 +889,18 @@ hold off;
 
 % === ROW 2: FLIP/TURNOVER ON Y-AXIS ===
 
-% Subplot (2,1): Idle/Turnover vs Flip/Turnover
-subplot(3,3,4);
-mask4 = baseMask & isfinite(idlePerTurn) & isfinite(flipPerTurn);
-scatter(idlePerTurn(mask4), flipPerTurn(mask4), 50, 'filled');
-grid on;
-xlabel('Idle/Turnover (minutes per turnover)');
-ylabel('Flip/Turnover (flips per turnover)');
-title('Daily: Flip/Turnover vs Idle/Turnover');
-hold on;
-if sum(mask4) >= 2
-    x = idlePerTurn(mask4);
-    y = flipPerTurn(mask4);
-    p = polyfit(x, y, 1);
-    xl = [min(x), max(x)];
-    yl = polyval(p, xl);
-    plot(xl, yl, 'r-', 'LineWidth', 2);
-    [rP, pP] = corr(x, y, 'Type','Pearson');
-    [rS, pS] = corr(x, y, 'Type','Spearman');
-    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
-end
-hold off;
-
 % Subplot (2,2): Avg Concurrent Labs vs Flip/Turnover
 subplot(3,3,5);
-mask5 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
-scatter(avgConcurrent(mask5), flipPerTurn(mask5), 50, 'filled');
+mask4 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
+scatter(avgConcurrent(mask4), flipPerTurn(mask4), 50, 'filled');
 grid on;
 xlabel('Average Concurrent Labs (setup+proc+post)');
 ylabel('Flip/Turnover (flips per turnover)');
 title('Daily: Flip/Turnover vs Avg Concurrent Labs');
 hold on;
-if sum(mask5) >= 2
-    x = avgConcurrent(mask5);
-    y = flipPerTurn(mask5);
+if sum(mask4) >= 2
+    x = avgConcurrent(mask4);
+    y = flipPerTurn(mask4);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -935,16 +913,16 @@ hold off;
 
 % Subplot (2,3): Flip Potential vs Flip/Turnover
 subplot(3,3,6);
-mask6 = baseMask & isfinite(flipPotential) & isfinite(flipPerTurn);
-scatter(flipPotential(mask6), flipPerTurn(mask6), 50, 'filled');
+mask5 = baseMask & isfinite(flipPotential) & isfinite(flipPerTurn);
+scatter(flipPotential(mask5), flipPerTurn(mask5), 50, 'filled');
 grid on;
 xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
 ylabel('Flip/Turnover (flips per turnover)');
 title('Daily: Flip/Turnover vs Flip Potential');
 hold on;
-if sum(mask6) >= 2
-    x = flipPotential(mask6);
-    y = flipPerTurn(mask6);
+if sum(mask5) >= 2
+    x = flipPotential(mask5);
+    y = flipPerTurn(mask5);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -959,16 +937,16 @@ hold off;
 
 % Subplot (3,1): Flip/Turnover vs Makespan
 subplot(3,3,7);
-mask7 = baseMask & isfinite(flipPerTurn) & isfinite(makespan);
-scatter(flipPerTurn(mask7), makespan(mask7), 50, 'filled');
+mask6 = baseMask & isfinite(flipPerTurn) & isfinite(makespan);
+scatter(flipPerTurn(mask6), makespan(mask6), 50, 'filled');
 grid on;
 xlabel('Flip/Turnover (flips per turnover)');
 ylabel('Makespan (minutes)');
 title('Daily: Makespan vs Flip/Turnover');
 hold on;
-if sum(mask7) >= 2
-    x = flipPerTurn(mask7);
-    y = makespan(mask7);
+if sum(mask6) >= 2
+    x = flipPerTurn(mask6);
+    y = makespan(mask6);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -981,16 +959,16 @@ hold off;
 
 % Subplot (3,2): Avg Concurrent Labs vs Makespan
 subplot(3,3,8);
-mask8 = baseMask & isfinite(avgConcurrent) & isfinite(makespan);
-scatter(avgConcurrent(mask8), makespan(mask8), 50, 'filled');
+mask7 = baseMask & isfinite(avgConcurrent) & isfinite(makespan);
+scatter(avgConcurrent(mask7), makespan(mask7), 50, 'filled');
 grid on;
 xlabel('Average Concurrent Labs (setup+proc+post)');
 ylabel('Makespan (minutes)');
 title('Daily: Makespan vs Avg Concurrent Labs');
 hold on;
-if sum(mask8) >= 2
-    x = avgConcurrent(mask8);
-    y = makespan(mask8);
+if sum(mask7) >= 2
+    x = avgConcurrent(mask7);
+    y = makespan(mask7);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -1003,16 +981,16 @@ hold off;
 
 % Subplot (3,3): Flip Potential vs Makespan
 subplot(3,3,9);
-mask9 = baseMask & isfinite(flipPotential) & isfinite(makespan);
-scatter(flipPotential(mask9), makespan(mask9), 50, 'filled');
+mask8 = baseMask & isfinite(flipPotential) & isfinite(makespan);
+scatter(flipPotential(mask8), makespan(mask8), 50, 'filled');
 grid on;
 xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
 ylabel('Makespan (minutes)');
 title('Daily: Makespan vs Flip Potential');
 hold on;
-if sum(mask9) >= 2
-    x = flipPotential(mask9);
-    y = makespan(mask9);
+if sum(mask8) >= 2
+    x = flipPotential(mask8);
+    y = makespan(mask8);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -1030,6 +1008,6 @@ annotation('textbox', [0.50, 0.93, 0.48, 0.06], 'String', ...
 
 fprintf(['Daily dept scatter plots created for %d days.\n' ...
          '  Excluded %d day(s) with avg concurrent labs < 3. Included %d day(s).\n' ...
-         '  Plotted pairs counts: mask1=%d, mask2=%d, mask3=%d, mask4=%d, mask5=%d.\n'], ...
-        numDays, excludedCount, includedCount, sum(mask1), sum(mask2), sum(mask3), sum(mask4), sum(mask5));
+         '  Plotted pairs counts: mask1=%d, mask2=%d, mask3=%d, mask4=%d, mask5=%d, mask6=%d, mask7=%d, mask8=%d.\n'], ...
+        numDays, excludedCount, includedCount, sum(mask1), sum(mask2), sum(mask3), sum(mask4), sum(mask5), sum(mask6), sum(mask7), sum(mask8));
 end
