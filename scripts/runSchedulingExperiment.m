@@ -240,10 +240,15 @@ function [schedule, scheduleResults] = optimizeWithProgress(historicalData, conf
         % Optimize single date with suppressed output
         % Build parameter list for rescheduleHistoricalCases
         paramList = {'TargetDate', dateStr, 'NumLabs', config.numLabs, 'TurnoverTime', config.turnoverTime, 'ShowProgress', false};
-        
+
         % Add lab start times if defined in config
         if isfield(config, 'startTime') && iscell(config.startTime)
             paramList = [paramList, {'LabStartTimes', config.startTime}];
+        end
+
+        % Add optimization metric if defined in config
+        if isfield(config, 'optimizationMetric')
+            paramList = [paramList, {'OptimizationMetric', config.optimizationMetric}];
         end
         
         evalc_output = evalc('[daySchedule, dayResults] = rescheduleHistoricalCases(historicalData, paramList{:});');
