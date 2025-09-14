@@ -3,7 +3,7 @@ function plotMultiExperimentResults(experimentResults, varargin)
 % Version: 1.0.0
 %
 % Inputs:
-%   experimentResults - cell array of results structures from run_experiment.m
+%   experimentResults - cell array of results structures from runSchedulingExperiment.m
 %
 % Optional Parameters:
 %   'MetricType'        - string, metric to plot ('IdleToTurnover', 'FlipToTurnover', 'Makespan', 'LabUtilization', 'MedianDailyIdleTime') (default: 'IdleToTurnover')

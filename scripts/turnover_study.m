@@ -4,7 +4,7 @@ function configs = turnover_study()
     % Creates multiple configurations to test different turnover times
     % using existing scripts from scripts/ directory
     
-    baseConfig = baseline_config();
+    baseConfig = configureExperiment();
     
     % Test different turnover times
     turnoverTimes = [5, 10, 15, 20, 30];

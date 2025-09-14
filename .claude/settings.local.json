@@ -21,7 +21,9 @@
       "WebFetch(domain:www.mathworks.com)",
       "Bash(mv:*)",
       "Bash(mkdir:*)",
-      "Bash(git switch:*)"
+      "Bash(git switch:*)",
+      "Bash(grep:*)",
+      "Bash(git mv:*)"
     ],
     "deny": []
   }

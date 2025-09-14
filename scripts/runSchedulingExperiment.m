@@ -1,13 +1,13 @@
-function results = run_experiment(config, varargin)
-    % RUN_EXPERIMENT - Execute a single scheduling experiment
+function results = runSchedulingExperiment(config, varargin)
+    % RUNSCHEDULINGEXPERIMENT - Execute a single scheduling experiment
     % 
     % This runner uses existing working scripts:
     % - scripts/loadHistoricalDataFromFile.m for data loading
     % - scripts/rescheduleHistoricalCases.m for optimization
     %
     % Syntax:
-    %   results = run_experiment(config)
-    %   results = run_experiment(config, 'SaveResults', true)
+    %   results = runSchedulingExperiment(config)
+    %   results = runSchedulingExperiment(config, 'SaveResults', true)
     %
     % Inputs:
     %   config - Configuration struct from config functions

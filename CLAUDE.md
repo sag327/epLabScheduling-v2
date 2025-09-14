@@ -20,10 +20,10 @@ epScheduling/
 │   ├── scheduleHistoricalCases.m      # Core optimization engine
 │   ├── rescheduleHistoricalCases.m    # Historical data re-optimization
 │   ├── loadHistoricalDataFromFile.m   # Data loading from Excel
-│   ├── run_experiment.m              # Single experiment runner
+│   ├── runSchedulingExperiment.m              # Single experiment runner
 │   ├── run_batch_experiments.m       # Batch experiment runner
 │   ├── calculate_experiment_metrics.m # Enhanced metrics calculation
-│   ├── baseline_config.m              # Default experiment configuration
+│   ├── configureExperiment.m              # Default experiment configuration
 │   ├── turnover_study.m               # Turnover time parameter study
 │   ├── lab_capacity_study.m           # Lab capacity parameter study
 │   ├── test_experiments.m             # Comprehensive test suite
@@ -47,7 +47,7 @@ matlab -batch "run('test_matlab_basic.m')"
 matlab -batch "run('scripts/test_experiments.m')"
 
 # Test single experiment
-matlab -batch "addpath('scripts'); config=baseline_config(); results=run_experiment(config,'SaveResults',false);"
+matlab -batch "addpath('scripts'); config=configureExperiment(); results=runSchedulingExperiment(config,'SaveResults',false);"
 ```
 
 ## Project Status
@@ -94,8 +94,8 @@ addpath('scripts');
 addpath('scripts');
 
 % Single experiment
-config = baseline_config();
-results = run_experiment(config);
+config = configureExperiment();
+results = runSchedulingExperiment(config);
 
 % Batch experiments
 batchResults = run_batch_experiments(@turnover_study);
@@ -120,8 +120,8 @@ targetDate = '02-Jan-2025';
 ### Enhanced Metrics Analysis
 ```matlab
 % Run experiment and analyze EP-specific metrics
-config = baseline_config();
-results = run_experiment(config);
+config = configureExperiment();
+results = runSchedulingExperiment(config);
 metrics = results.metrics;
 
 fprintf('Operator idle/turnover ratio: %.3f\n', metrics.operatorIdleToTurnoverRatio);
@@ -139,10 +139,10 @@ fprintf('Cases per hour: %.1f\n', metrics.casesPerHour);
 - `scripts/visualizeSchedule.m` - Schedule visualization tools
 
 ### Experiment Framework
-- `scripts/run_experiment.m` - Single experiment runner
+- `scripts/runSchedulingExperiment.m` - Single experiment runner
 - `scripts/run_batch_experiments.m` - Batch experiment processor
 - `scripts/calculate_experiment_metrics.m` - Enhanced metrics calculation
-- `scripts/baseline_config.m` - Default experiment configuration
+- `scripts/configureExperiment.m` - Default experiment configuration
 - `scripts/turnover_study.m` - Turnover time parameter study
 - `scripts/lab_capacity_study.m` - Lab capacity parameter study
 - `scripts/test_experiments.m` - Comprehensive test suite

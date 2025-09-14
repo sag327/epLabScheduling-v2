@@ -12,7 +12,7 @@ experiments/
 └── EXPERIMENT_GUIDE.md
 
 scripts/              # All experiment runners are in main scripts directory
-├── run_experiment.m          # Single experiment runner
+├── runSchedulingExperiment.m          # Single experiment runner
 ├── run_batch_experiments.m   # Batch experiment runner  
 ├── calculate_experiment_metrics.m  # Enhanced metrics calculation
 └── (other existing scripts...)
@@ -36,8 +36,8 @@ addpath('experiments/configs');
 addpath('scripts');
 
 % Run baseline experiment
-config = baseline_config();
-results = run_experiment(config);
+config = configureExperiment();
+results = runSchedulingExperiment(config);
 
 % View results
 fprintf('Makespan: %.1f hours\\n', results.metrics.makespan/60);
@@ -56,7 +56,7 @@ batchResults = run_batch_experiments(@lab_capacity_study);
 
 ## Configuration Files
 
-### `baseline_config.m`
+### `configureExperiment.m`
 Default experiment configuration:
 - 3 labs, 15-minute turnover
 - Uses real data from `clinicalData/testProcedureDurations-3day.xlsx`
@@ -72,7 +72,7 @@ Tests different numbers of labs: 2, 3, 4, 5 labs
 
 ```matlab
 function config = my_custom_config()
-    config = baseline_config();  % Start with baseline
+    config = configureExperiment();  % Start with baseline
     
     % Modify parameters
     config.experimentName = 'custom_test';
@@ -177,7 +177,7 @@ fprintf('Turnover impact: %.1f%% efficiency range\\n',
 ```matlab
 % Create custom configuration
 function configs = my_study()
-    base = baseline_config();
+    base = configureExperiment();
     configs = {};
     
     % Test combinations of labs and turnover

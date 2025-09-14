@@ -65,7 +65,7 @@ function batchResults = run_batch_experiments(configFunction, varargin)
             expOutputDir = fullfile(outputDir, sprintf('exp_%02d_%s', i, config.experimentName));
             
             % Run single experiment
-            results = run_experiment(config, 'SaveResults', saveResults, 'OutputDir', expOutputDir);
+            results = runSchedulingExperiment(config, 'SaveResults', saveResults, 'OutputDir', expOutputDir);
             
             % Store results
             batchResults.experiments{i} = results;

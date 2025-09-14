@@ -12,7 +12,7 @@ fprintf('=== Testing EP Scheduling Experiments Framework ===\n\n');
 %% Test 1: Configuration Loading
 fprintf('1. Testing configuration loading...\n');
 try
-    config = baseline_config();
+    config = configureExperiment();
     fprintf('   ✓ Baseline config loaded: %s\n', config.experimentName);
     
     configs = turnover_study();
@@ -30,11 +30,11 @@ end
 %% Test 2: Single Experiment - Synthetic Data
 fprintf('2. Testing single experiment with synthetic data...\n');
 try
-    config = baseline_config();
+    config = configureExperiment();
     config.useSyntheticData = true;
     config.verboseOutput = false;
     
-    results = run_experiment(config, 'SaveResults', false);
+    results = runSchedulingExperiment(config, 'SaveResults', false);
     
     fprintf('   ✓ Experiment completed\n');
     fprintf('     - Makespan: %.1f hours\n', results.metrics.makespan/60);
@@ -49,11 +49,11 @@ end
 %% Test 3: Single Experiment - Real Data  
 fprintf('3. Testing single experiment with real data...\n');
 try
-    config = baseline_config();
+    config = configureExperiment();
     config.useSyntheticData = false;
     config.verboseOutput = false;
     
-    results = run_experiment(config, 'SaveResults', false);
+    results = runSchedulingExperiment(config, 'SaveResults', false);
     
     fprintf('   ✓ Experiment completed\n');
     fprintf('     - Makespan: %.1f hours\n', results.metrics.makespan/60);
@@ -119,7 +119,7 @@ fprintf('The experiments framework is working correctly and properly\n');
 fprintf('integrates with existing working scripts from scripts/ directory.\n\n');
 
 fprintf('Ready to run:\n');
-fprintf('• Single experiments: results = run_experiment(baseline_config());\n');
+fprintf('• Single experiments: results = runSchedulingExperiment(configureExperiment());\n');
 fprintf('• Batch experiments: batchResults = run_batch_experiments(@turnover_study);\n');
 fprintf('• Custom configurations: Edit config files in scripts/\n\n');
 

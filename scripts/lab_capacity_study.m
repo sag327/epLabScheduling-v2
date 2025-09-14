@@ -4,7 +4,7 @@ function configs = lab_capacity_study()
     % Creates multiple configurations to test different numbers of labs
     % using existing scripts from scripts/ directory
     
-    baseConfig = baseline_config();
+    baseConfig = configureExperiment();
     
     % Test different numbers of labs
     numLabsValues = [2, 3, 4, 5];
