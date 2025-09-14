@@ -916,6 +916,11 @@ for i = 1:numCases
                 caseInfo.procEndTime = caseInfo.procStartTime + caseInfo.procTime;
                 caseInfo.turnoverTime = turnoverTime;
                 
+                % Copy admission status if available
+                if isfield(cases(i), 'admissionStatus')
+                    caseInfo.admissionStatus = cases(i).admissionStatus;
+                end
+                
                 if isempty(schedule.labs{j})
                     schedule.labs{j} = caseInfo;
                 else
@@ -1029,6 +1034,11 @@ for i = 1:length(sortedCases)
     caseInfo.procStartTime = bestStartTime + caseInfo.setupTime;
     caseInfo.procEndTime = caseInfo.procStartTime + caseInfo.procTime;
     caseInfo.turnoverTime = turnoverTime;
+    
+    % Copy admission status if available
+    if isfield(case_i, 'admissionStatus')
+        caseInfo.admissionStatus = case_i.admissionStatus;
+    end
     
     if isempty(schedule.labs{bestLab})
         schedule.labs{bestLab} = caseInfo;

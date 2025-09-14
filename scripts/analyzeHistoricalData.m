@@ -50,11 +50,12 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %     .labFlipAnalysis        - Lab switching and flip statistics (if schedules provided)
 %       - scheduleAnalysis.dailyEfficiency:
 %           .byDate(date) with department-wide daily metrics across all labs/operators:
-%               overallDeptTotalOperatorIdleTimeDaily, overallDeptTotalTurnoversDaily,
-%               overallDeptIdleToTurnoverRatioDaily, overallDeptTotalLabFlipsDaily,
-%               overallDeptFlipToTurnoverRatioDaily, overallDeptMakespanDaily,
-%               overallDeptTotalRoomBusyTimeDaily (setup+proc+post),
-%               overallDeptAvgConcurrentLabsDaily, overallDeptNumLabsActiveDaily
+%               overallDeptTotalOperatorIdleTimeDaily, overallDeptMedianOperatorIdleTimeDaily,
+%               overallDeptTotalTurnoversDaily, overallDeptIdleToTurnoverRatioDaily, 
+%               overallDeptTotalLabFlipsDaily, overallDeptFlipToTurnoverRatioDaily, 
+%               overallDeptMakespanDaily, overallDeptTotalRoomBusyTimeDaily (setup+proc+post),
+%               overallDeptAvgConcurrentLabsDaily, overallDeptNumLabsActiveDaily,
+%               overallDeptOperatorsWithOutpatientDaily
 %           .summary with means/stds and correlations:
 %               mean/std of idleToTurnover, flipToTurnover, avgConcurrentLabs; and
 %               corrIdle_vs_FlipTurnover, corrIdle_vs_AvgConcurrentLabs (pearson/spearman)
@@ -567,9 +568,24 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
                 avgConcurrentLabs = NaN;
             end
 
+            % Calculate median of individual operator idle times
+            medianOperatorIdle = NaN;
+            try
+                idleVals = values(dayIdleStats);
+                if ~isempty(idleVals)
+                    idleArray = cell2mat(idleVals);
+                    if ~isempty(idleArray)
+                        medianOperatorIdle = median(idleArray);
+                    end
+                end
+            catch
+                medianOperatorIdle = NaN;
+            end
+
             % Persist daily overall department metrics
             dayEff = struct();
             dayEff.overallDeptTotalOperatorIdleTimeDaily = totalOperatorIdle;
+            dayEff.overallDeptMedianOperatorIdleTimeDaily = medianOperatorIdle;
             dayEff.overallDeptTotalTurnoversDaily = totalTurnovers;
             dayEff.overallDeptIdleToTurnoverRatioDaily = idleToTurnover;
             dayEff.overallDeptTotalLabFlipsDaily = dayLabFlipsCount;
@@ -578,6 +594,87 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             dayEff.overallDeptTotalRoomBusyTimeDaily = totalRoomBusyTime;
             dayEff.overallDeptAvgConcurrentLabsDaily = avgConcurrentLabs;
             dayEff.overallDeptNumLabsActiveDaily = numLabsActive;
+            
+            % Calculate number of operators with outpatient procedures this day
+            operatorsWithOutpatient = 0;
+            if isfield(schedule, 'operators')
+                activeOperators = keys(schedule.operators);
+                for opIdx = 1:length(activeOperators)
+                    opName = activeOperators{opIdx};
+                    opSchedule = schedule.operators(opName);
+                    
+                    % Check if operator has any outpatient procedures
+                    hasOutpatient = false;
+                    if isstruct(opSchedule) && length(opSchedule) > 0
+                        for caseIdx = 1:length(opSchedule)
+                            if isfield(opSchedule(caseIdx), 'caseInfo') && isfield(opSchedule(caseIdx).caseInfo, 'admissionStatus')
+                                admissionStatus = string(opSchedule(caseIdx).caseInfo.admissionStatus);
+                                if contains(admissionStatus, 'Outpatient', 'IgnoreCase', true)
+                                    hasOutpatient = true;
+                                    break;
+                                end
+                            end
+                        end
+                    end
+                    
+                    if hasOutpatient
+                        operatorsWithOutpatient = operatorsWithOutpatient + 1;
+                    end
+                end
+            end
+            dayEff.overallDeptOperatorsWithOutpatientDaily = operatorsWithOutpatient;
+            
+            % Calculate effective outpatient operators
+            % Sum outpatient procedure durations by operator, normalize to 8-hour equivalent
+            effectiveOutpatientOperators = 0;
+            if isfield(schedule, 'operators')
+                activeOperators = keys(schedule.operators);
+                for opIdx = 1:length(activeOperators)
+                    opName = activeOperators{opIdx};
+                    opSchedule = schedule.operators(opName);
+                    
+                    % Convert to array if it's a single struct
+                    if ~isfield(opSchedule, 'lab') && length(opSchedule) == 1 && isstruct(opSchedule)
+                        opSchedule = [opSchedule];
+                    end
+                    
+                    totalOutpatientProcTime = 0;
+                    
+                    % Sum procedure time for outpatient cases only
+                    for caseIdx = 1:length(opSchedule)
+                        if isfield(opSchedule(caseIdx), 'caseInfo')
+                            caseInfo = opSchedule(caseIdx).caseInfo;
+                        else
+                            caseInfo = opSchedule(caseIdx);
+                        end
+                        
+                        % Check if this is an outpatient case
+                        isOutpatient = false;
+                        if isfield(caseInfo, 'admissionStatus')
+                            admissionStatus = caseInfo.admissionStatus;
+                            if contains(lower(admissionStatus), {'outpatient', 'amb proc', 'ambulatory'})
+                                isOutpatient = true;
+                            end
+                        end
+                        
+                        if isOutpatient && isfield(caseInfo, 'procTime')
+                            totalOutpatientProcTime = totalOutpatientProcTime + caseInfo.procTime;
+                        end
+                    end
+                    
+                    % Convert to 8-hour equivalent (normalize by 480 minutes = 8 hours)
+                    if totalOutpatientProcTime > 0
+                        operatorEquivalent = totalOutpatientProcTime / (8 * 60); % 8 hours = 480 minutes
+                        effectiveOutpatientOperators = effectiveOutpatientOperators + operatorEquivalent;
+                    end
+                end
+            end
+            dayEff.overallDeptEffectiveOutpatientOperatorsDaily = effectiveOutpatientOperators;
+            
+            % Calculate flip potential: active labs minus effective outpatient operators
+            flipPotential = numLabsActive - effectiveOutpatientOperators;
+            dayEff.overallDeptFlipPotentialDaily = flipPotential;
+            
             dailyEfficiencyMap(scheduleKey) = dayEff;
 
             % Collect for summary/correlation

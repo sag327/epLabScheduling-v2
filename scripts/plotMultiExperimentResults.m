@@ -6,7 +6,7 @@ function plotMultiExperimentResults(experimentResults, varargin)
 %   experimentResults - cell array of results structures from run_experiment.m
 %
 % Optional Parameters:
-%   'MetricType'        - string, metric to plot ('IdleToTurnover', 'FlipToTurnover', 'Makespan', 'LabUtilization') (default: 'IdleToTurnover')
+%   'MetricType'        - string, metric to plot ('IdleToTurnover', 'FlipToTurnover', 'Makespan', 'LabUtilization', 'MedianDailyIdleTime') (default: 'IdleToTurnover')
 %   'PlotType'          - string, type of plot ('Bar', 'Box', 'Line') (default: 'Bar')
 %   'ShowIndividualOps' - logical, show individual operator metrics within experiments (default: false)
 %   'ExperimentNames'   - cell array of strings, custom names for experiments (default: auto-generated)
@@ -15,6 +15,7 @@ function plotMultiExperimentResults(experimentResults, varargin)
 % Examples:
 %   plotMultiExperimentResults(experimentResults)  % Default: average idle to turnover ratio bar chart
 %   plotMultiExperimentResults(experimentResults, 'MetricType', 'Makespan')
+%   plotMultiExperimentResults(experimentResults, 'MetricType', 'MedianDailyIdleTime')
 %   plotMultiExperimentResults(experimentResults, 'PlotType', 'Box', 'ShowIndividualOps', true)
 %   plotMultiExperimentResults(experimentResults, 'ExperimentNames', {'Baseline', 'Optimized'})
 
@@ -87,8 +88,10 @@ switch metricType
         [metricData, metricLabel, metricUnit] = extractMakespanMetrics(experimentResults, showIndividualOps);
     case 'LabUtilization'
         [metricData, metricLabel, metricUnit] = extractLabUtilizationMetrics(experimentResults, showIndividualOps);
+    case 'MedianDailyIdleTime'
+        [metricData, metricLabel, metricUnit] = extractMedianDailyIdleTimeMetrics(experimentResults, showIndividualOps);
     otherwise
-        error('Unsupported metric type: %s. Supported types: IdleToTurnover, FlipToTurnover, Makespan, LabUtilization', metricType);
+        error('Unsupported metric type: %s. Supported types: IdleToTurnover, FlipToTurnover, Makespan, LabUtilization, MedianDailyIdleTime', metricType);
 end
 
 % Create plot based on plot type
@@ -509,6 +512,76 @@ else
         end
     else
         text(0.5, 0.5, 'No data available', 'HorizontalAlignment', 'center', 'Units', 'normalized');
+    end
+end
+end
+
+function [metricData, metricLabel, metricUnit] = extractMedianDailyIdleTimeMetrics(experimentResults, showIndividualOps)
+% Extract median of total daily idle time metrics (sum across all operators per day)
+metricLabel = 'Median Total Daily Idle Time';
+metricUnit = 'minutes';
+numExperiments = length(experimentResults);
+
+if showIndividualOps
+    % Extract total daily idle time for each date as individual data points
+    metricData = cell(numExperiments, 1);
+    
+    for i = 1:numExperiments
+        result = experimentResults{i};
+        dailyTotalIdleTimes = [];
+        
+        if isfield(result, 'analysisResults')
+            analysisRes = result.analysisResults;
+            if isfield(analysisRes, 'scheduleAnalysis')
+                schedAnalysis = analysisRes.scheduleAnalysis;
+                if isfield(schedAnalysis, 'dailyEfficiency') && isfield(schedAnalysis.dailyEfficiency, 'byDate')
+                    dailyEffMap = schedAnalysis.dailyEfficiency.byDate;
+                    dateKeys = keys(dailyEffMap);
+                    
+                    for j = 1:length(dateKeys)
+                        dayData = dailyEffMap(dateKeys{j});
+                        if isfield(dayData, 'overallDeptTotalOperatorIdleTimeDaily') && ~isnan(dayData.overallDeptTotalOperatorIdleTimeDaily)
+                            dailyTotalIdleTimes(end+1) = dayData.overallDeptTotalOperatorIdleTimeDaily;
+                        end
+                    end
+                end
+            end
+        end
+        
+        metricData{i} = dailyTotalIdleTimes;
+    end
+else
+    % Extract median of total daily idle times across all dates
+    metricData = zeros(numExperiments, 1);
+    
+    for i = 1:numExperiments
+        result = experimentResults{i};
+        dailyTotalIdleTimes = [];
+        
+        if isfield(result, 'analysisResults')
+            analysisRes = result.analysisResults;
+            if isfield(analysisRes, 'scheduleAnalysis')
+                schedAnalysis = analysisRes.scheduleAnalysis;
+                if isfield(schedAnalysis, 'dailyEfficiency') && isfield(schedAnalysis.dailyEfficiency, 'byDate')
+                    dailyEffMap = schedAnalysis.dailyEfficiency.byDate;
+                    dateKeys = keys(dailyEffMap);
+                    
+                    for j = 1:length(dateKeys)
+                        dayData = dailyEffMap(dateKeys{j});
+                        if isfield(dayData, 'overallDeptTotalOperatorIdleTimeDaily') && ~isnan(dayData.overallDeptTotalOperatorIdleTimeDaily)
+                            dailyTotalIdleTimes(end+1) = dayData.overallDeptTotalOperatorIdleTimeDaily;
+                        end
+                    end
+                end
+            end
+        end
+        
+        if ~isempty(dailyTotalIdleTimes)
+            metricData(i) = median(dailyTotalIdleTimes);
+        else
+            fprintf('Warning: No total daily idle time found for experiment %d\n', i);
+            metricData(i) = NaN;
+        end
     end
 end
 end

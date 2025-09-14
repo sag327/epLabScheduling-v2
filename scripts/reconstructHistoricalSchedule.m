@@ -169,6 +169,13 @@ for i = 1:numValidCases
     
     % Store estimated turnover time
     historicalCases(i).turnoverTime = turnoverTime;
+    
+    % Add admission status if available
+    if isfield(historicalData, 'admissionStatus') && ~ismissing(historicalData.admissionStatus(idx))
+        historicalCases(i).admissionStatus = char(historicalData.admissionStatus(idx));
+    else
+        historicalCases(i).admissionStatus = 'Unknown';
+    end
 end
 
 % Determine number of unique rooms used and create mapping
@@ -255,6 +262,9 @@ for i = 1:numValidCases
     scheduleCase.procTime = caseInfo.procTime;
     scheduleCase.postTime = caseInfo.postTime;
     scheduleCase.turnoverTime = turnoverTime;
+    
+    % Add admission status
+    scheduleCase.admissionStatus = caseInfo.admissionStatus;
     
     % Add to lab schedule
     if isempty(historicalSchedule.labs{labIdx})

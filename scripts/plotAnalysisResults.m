@@ -51,7 +51,7 @@ addParameter(p, 'SelectedProcedure', '', @ischar);
 addParameter(p, 'SelectedMetric', '', @ischar);
 parse(p, varargin{:});
 
-createCorrelationPlot = p.Results.CreateCorrelationPlot;
+doCreateCorrelationPlot = p.Results.CreateCorrelationPlot;
 createTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
 createBoxPlots = p.Results.CreateBoxPlots;
 createDailyDeptScatter = p.Results.CreateDailyDeptScatter;
@@ -183,7 +183,7 @@ for i = 1:length(medianIdleTimeToTurnoverRatio)
 end
 
 % Create correlation plot if requested
-if createCorrelationPlot
+if doCreateCorrelationPlot
     % Auto-select or use provided procedure/metric
     if isempty(selectedProcedure) || isempty(selectedMetric)
         [selectedProcedure, selectedMetric] = selectProcedureAndMetric(analysisResults);
@@ -786,6 +786,8 @@ idlePerTurn = NaN(numDays,1);
 flipPerTurn = NaN(numDays,1);
 avgConcurrent = NaN(numDays,1);
 makespan = NaN(numDays,1);
+outpatientOps = NaN(numDays,1);
+flipPotential = NaN(numDays,1);
 
 for i = 1:numDays
     d = dailyEff.byDate(dateKeys{i});
@@ -801,9 +803,15 @@ for i = 1:numDays
     if isfield(d, 'overallDeptMakespanDaily')
         makespan(i) = d.overallDeptMakespanDaily;
     end
+    if isfield(d, 'overallDeptOperatorsWithOutpatientDaily')
+        outpatientOps(i) = d.overallDeptOperatorsWithOutpatientDaily;
+    end
+    if isfield(d, 'overallDeptFlipPotentialDaily')
+        flipPotential(i) = d.overallDeptFlipPotentialDaily;
+    end
 end
 
-figure('Position', [100, 100, 1600, 900]);
+figure('Position', [100, 100, 1800, 1000]);
 
 % Exclude outlier days: average concurrent labs < 3 (applies to all subplots)
 baseMask = isfinite(avgConcurrent) & avgConcurrent >= 3;
@@ -811,8 +819,10 @@ excludedCount = sum(isfinite(avgConcurrent) & avgConcurrent < 3);
 includedCount = sum(baseMask);
 totalCount = numDays;
 
-% Subplot 1: Idle/Turnover vs Flip/Turnover
-subplot(2,3,1);
+% === ROW 1: IDLE/TURNOVER ON Y-AXIS ===
+
+% Subplot (1,1): Flip/Turnover vs Idle/Turnover
+subplot(3,3,1);
 mask1 = baseMask & isfinite(idlePerTurn) & isfinite(flipPerTurn);
 scatter(flipPerTurn(mask1), idlePerTurn(mask1), 50, 'filled');
 grid on;
@@ -833,8 +843,8 @@ if sum(mask1) >= 2
 end
 hold off;
 
-% Subplot 2: Idle/Turnover vs Avg Concurrent Labs
-subplot(2,3,2);
+% Subplot (1,2): Avg Concurrent Labs vs Idle/Turnover
+subplot(3,3,2);
 mask2 = baseMask & isfinite(idlePerTurn) & isfinite(avgConcurrent);
 scatter(avgConcurrent(mask2), idlePerTurn(mask2), 50, 'filled');
 grid on;
@@ -855,18 +865,18 @@ if sum(mask2) >= 2
 end
 hold off;
 
-% Subplot 3: Flip/Turnover vs Makespan (Makespan on Y-axis)
-subplot(2,3,3);
-mask3 = baseMask & isfinite(flipPerTurn) & isfinite(makespan);
-scatter(flipPerTurn(mask3), makespan(mask3), 50, 'filled');
+% Subplot (1,3): Flip Potential vs Idle/Turnover
+subplot(3,3,3);
+mask3 = baseMask & isfinite(idlePerTurn) & isfinite(flipPotential);
+scatter(flipPotential(mask3), idlePerTurn(mask3), 50, 'filled');
 grid on;
-xlabel('Flip/Turnover (flips per turnover)');
-ylabel('Makespan (minutes)');
-title('Daily: Flip/Turnover vs Makespan');
+xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
+ylabel('Idle/Turnover (minutes per turnover)');
+title('Daily: Idle/Turnover vs Flip Potential');
 hold on;
 if sum(mask3) >= 2
-    x = flipPerTurn(mask3);
-    y = makespan(mask3);
+    x = flipPotential(mask3);
+    y = idlePerTurn(mask3);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
@@ -877,40 +887,132 @@ if sum(mask3) >= 2
 end
 hold off;
 
-% Subplot 4: Avg Concurrent Labs vs Makespan (Makespan on Y-axis)
-subplot(2,3,4);
-mask4 = baseMask & isfinite(avgConcurrent) & isfinite(makespan);
-scatter(avgConcurrent(mask4), makespan(mask4), 50, 'filled');
-grid on;
-xlabel('Average Concurrent Labs (setup+proc+post)');
-ylabel('Makespan (minutes)');
-title('Daily: Avg Concurrent Labs vs Makespan');
-hold on;
-if sum(mask4) >= 2
-    x = avgConcurrent(mask4);
-    y = makespan(mask4);
-    p = polyfit(x, y, 1);
-    xl = [min(x), max(x)];
-    yl = polyval(p, xl);
-    plot(xl, yl, 'r-', 'LineWidth', 2);
-    [rP, pP] = corr(x, y, 'Type','Pearson');
-    [rS, pS] = corr(x, y, 'Type','Spearman');
-    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
-end
-hold off;
+% === ROW 2: FLIP/TURNOVER ON Y-AXIS ===
 
-% Subplot 5: Avg Concurrent Labs vs Flip/Turnover
-subplot(2,3,5);
-mask5 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
-scatter(flipPerTurn(mask5), avgConcurrent(mask5), 50, 'filled');
+% Subplot (2,1): Flip/Turnover vs Avg Concurrent Labs  
+subplot(3,3,4);
+mask4 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
+scatter(flipPerTurn(mask4), avgConcurrent(mask4), 50, 'filled');
 grid on;
 xlabel('Flip/Turnover (flips per turnover)');
 ylabel('Average Concurrent Labs (setup+proc+post)');
 title('Daily: Avg Concurrent Labs vs Flip/Turnover');
 hold on;
+if sum(mask4) >= 2
+    x = flipPerTurn(mask4);
+    y = avgConcurrent(mask4);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot (2,2): Avg Concurrent Labs vs Flip/Turnover
+subplot(3,3,5);
+mask5 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
+scatter(avgConcurrent(mask5), flipPerTurn(mask5), 50, 'filled');
+grid on;
+xlabel('Average Concurrent Labs (setup+proc+post)');
+ylabel('Flip/Turnover (flips per turnover)');
+title('Daily: Flip/Turnover vs Avg Concurrent Labs');
+hold on;
 if sum(mask5) >= 2
-    x = flipPerTurn(mask5);
-    y = avgConcurrent(mask5);
+    x = avgConcurrent(mask5);
+    y = flipPerTurn(mask5);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot (2,3): Flip Potential vs Flip/Turnover
+subplot(3,3,6);
+mask6 = baseMask & isfinite(flipPotential) & isfinite(flipPerTurn);
+scatter(flipPotential(mask6), flipPerTurn(mask6), 50, 'filled');
+grid on;
+xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
+ylabel('Flip/Turnover (flips per turnover)');
+title('Daily: Flip/Turnover vs Flip Potential');
+hold on;
+if sum(mask6) >= 2
+    x = flipPotential(mask6);
+    y = flipPerTurn(mask6);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% === ROW 3: MAKESPAN ON Y-AXIS ===
+
+% Subplot (3,1): Flip/Turnover vs Makespan
+subplot(3,3,7);
+mask7 = baseMask & isfinite(flipPerTurn) & isfinite(makespan);
+scatter(flipPerTurn(mask7), makespan(mask7), 50, 'filled');
+grid on;
+xlabel('Flip/Turnover (flips per turnover)');
+ylabel('Makespan (minutes)');
+title('Daily: Makespan vs Flip/Turnover');
+hold on;
+if sum(mask7) >= 2
+    x = flipPerTurn(mask7);
+    y = makespan(mask7);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot (3,2): Avg Concurrent Labs vs Makespan
+subplot(3,3,8);
+mask8 = baseMask & isfinite(avgConcurrent) & isfinite(makespan);
+scatter(avgConcurrent(mask8), makespan(mask8), 50, 'filled');
+grid on;
+xlabel('Average Concurrent Labs (setup+proc+post)');
+ylabel('Makespan (minutes)');
+title('Daily: Makespan vs Avg Concurrent Labs');
+hold on;
+if sum(mask8) >= 2
+    x = avgConcurrent(mask8);
+    y = makespan(mask8);
+    p = polyfit(x, y, 1);
+    xl = [min(x), max(x)];
+    yl = polyval(p, xl);
+    plot(xl, yl, 'r-', 'LineWidth', 2);
+    [rP, pP] = corr(x, y, 'Type','Pearson');
+    [rS, pS] = corr(x, y, 'Type','Spearman');
+    legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
+end
+hold off;
+
+% Subplot (3,3): Flip Potential vs Makespan
+subplot(3,3,9);
+mask9 = baseMask & isfinite(flipPotential) & isfinite(makespan);
+scatter(flipPotential(mask9), makespan(mask9), 50, 'filled');
+grid on;
+xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
+ylabel('Makespan (minutes)');
+title('Daily: Makespan vs Flip Potential');
+hold on;
+if sum(mask9) >= 2
+    x = flipPotential(mask9);
+    y = makespan(mask9);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
