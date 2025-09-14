@@ -889,18 +889,18 @@ hold off;
 
 % === ROW 2: FLIP/TURNOVER ON Y-AXIS ===
 
-% Subplot (2,1): Flip/Turnover vs Avg Concurrent Labs  
+% Subplot (2,1): Idle/Turnover vs Flip/Turnover
 subplot(3,3,4);
-mask4 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
-scatter(flipPerTurn(mask4), avgConcurrent(mask4), 50, 'filled');
+mask4 = baseMask & isfinite(idlePerTurn) & isfinite(flipPerTurn);
+scatter(idlePerTurn(mask4), flipPerTurn(mask4), 50, 'filled');
 grid on;
-xlabel('Flip/Turnover (flips per turnover)');
-ylabel('Average Concurrent Labs (setup+proc+post)');
-title('Daily: Avg Concurrent Labs vs Flip/Turnover');
+xlabel('Idle/Turnover (minutes per turnover)');
+ylabel('Flip/Turnover (flips per turnover)');
+title('Daily: Flip/Turnover vs Idle/Turnover');
 hold on;
 if sum(mask4) >= 2
-    x = flipPerTurn(mask4);
-    y = avgConcurrent(mask4);
+    x = idlePerTurn(mask4);
+    y = flipPerTurn(mask4);
     p = polyfit(x, y, 1);
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
