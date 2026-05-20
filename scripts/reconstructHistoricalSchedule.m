@@ -7,7 +7,7 @@ function [historicalSchedule, results] = reconstructHistoricalSchedule(historica
 %   targetDate - Date string (e.g., '05-01-2025') or datetime object
 %
 % Optional Parameters (Name-Value pairs):
-%   'TurnoverTime' - Estimated turnover time between cases (default: 15 minutes)
+%   'TurnoverTime' - Optional fallback turnover time for cases missing actual timing (default: 0 minutes)
 %   'Debug' - Show debug output (default: false)
 %
 % Outputs:
@@ -24,7 +24,7 @@ function [historicalSchedule, results] = reconstructHistoricalSchedule(historica
 p = inputParser;
 addRequired(p, 'historicalData', @isstruct);
 addRequired(p, 'targetDate');
-addParameter(p, 'TurnoverTime', 15, @(x) isnumeric(x) && x >= 0);
+addParameter(p, 'TurnoverTime', 0, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'Debug', false, @islogical);
 
 parse(p, historicalData, targetDate, varargin{:});
@@ -149,14 +149,20 @@ for i = 1:numValidCases
     historicalCases(i).postTime = ensureValidTime(historicalData.postTime(idx), 15);
     
     % Extract actual start and end times from historical timestamps
-    if ~ismissing(historicalData.procedureStartTimeOfDay(idx))
+    if ~ismissing(historicalData.procedureStartTimeOfDay(idx)) && ...
+            isfield(historicalData, 'procedureCompleteTimeOfDay') && ...
+            ~ismissing(historicalData.procedureCompleteTimeOfDay(idx))
         % Convert duration to minutes since midnight
         startTimeOfDay = historicalData.procedureStartTimeOfDay(idx);
+        completeTimeOfDay = historicalData.procedureCompleteTimeOfDay(idx);
         historicalCases(i).actualProcStartTime = minutes(startTimeOfDay);
+        historicalCases(i).actualProcEndTime = minutes(completeTimeOfDay);
+        if historicalCases(i).actualProcEndTime < historicalCases(i).actualProcStartTime
+            historicalCases(i).actualProcEndTime = historicalCases(i).actualProcEndTime + 24 * 60;
+        end
         
         % Calculate other times based on actual procedure start
         historicalCases(i).actualStartTime = historicalCases(i).actualProcStartTime - historicalCases(i).setupTime;
-        historicalCases(i).actualProcEndTime = historicalCases(i).actualProcStartTime + historicalCases(i).procTime;
         historicalCases(i).actualEndTime = historicalCases(i).actualProcEndTime + historicalCases(i).postTime;
     else
         % Fallback if no actual times available
@@ -167,8 +173,10 @@ for i = 1:numValidCases
         historicalCases(i).actualEndTime = NaN;
     end
     
-    % Store estimated turnover time
-    historicalCases(i).turnoverTime = turnoverTime;
+    % Historical turnover is observed as the gap between room exit and the next room entry.
+    % The configured turnover time is only used for fallback estimated schedules.
+    historicalCases(i).turnoverTime = 0;
+    historicalCases(i).fallbackTurnoverTime = turnoverTime;
     
     % Add admission status if available
     if isfield(historicalData, 'admissionStatus') && ~ismissing(historicalData.admissionStatus(idx))
@@ -249,19 +257,25 @@ for i = 1:numValidCases
         scheduleCase.startTime = caseInfo.actualStartTime;
         scheduleCase.procStartTime = caseInfo.actualProcStartTime;
         scheduleCase.procEndTime = caseInfo.actualProcEndTime;
-        scheduleCase.endTime = caseInfo.actualEndTime + turnoverTime; % Add turnover
+        scheduleCase.endTime = caseInfo.actualEndTime;
+        appliedTurnoverTime = 0;
     else
         % Use estimated times (this shouldn't happen often with good historical data)
         scheduleCase.startTime = 8 * 60; % Default start at 8 AM
         scheduleCase.procStartTime = scheduleCase.startTime + caseInfo.setupTime;
         scheduleCase.procEndTime = scheduleCase.procStartTime + caseInfo.procTime;
         scheduleCase.endTime = scheduleCase.procEndTime + caseInfo.postTime + turnoverTime;
+        appliedTurnoverTime = turnoverTime;
     end
     
     scheduleCase.setupTime = caseInfo.setupTime;
     scheduleCase.procTime = caseInfo.procTime;
     scheduleCase.postTime = caseInfo.postTime;
-    scheduleCase.turnoverTime = turnoverTime;
+    scheduleCase.turnoverTime = appliedTurnoverTime;
+    scheduleCase.fallbackTurnoverTime = turnoverTime;
+    scheduleCase.usedFallbackTurnover = appliedTurnoverTime > 0;
+    scheduleCase.observedRoomGapAfterCase = NaN;
+    scheduleCase.nextCaseStartTime = NaN;
     
     % Add admission status
     scheduleCase.admissionStatus = caseInfo.admissionStatus;
@@ -293,6 +307,17 @@ for j = 1:numLabs
     if ~isempty(historicalSchedule.labs{j})
         [~, sortIdx] = sort([historicalSchedule.labs{j}.startTime]);
         historicalSchedule.labs{j} = historicalSchedule.labs{j}(sortIdx);
+        for c = 1:length(historicalSchedule.labs{j})
+            if c < length(historicalSchedule.labs{j})
+                nextStart = historicalSchedule.labs{j}(c+1).startTime;
+                currentEnd = historicalSchedule.labs{j}(c).endTime;
+                historicalSchedule.labs{j}(c).nextCaseStartTime = nextStart;
+                historicalSchedule.labs{j}(c).observedRoomGapAfterCase = max(0, nextStart - currentEnd);
+            else
+                historicalSchedule.labs{j}(c).nextCaseStartTime = NaN;
+                historicalSchedule.labs{j}(c).observedRoomGapAfterCase = NaN;
+            end
+        end
     end
 end
 

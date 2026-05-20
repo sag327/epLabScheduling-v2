@@ -450,7 +450,12 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     dailyEfficiencyMap = containers.Map();
     dailyIdleToTurnoverList = NaN(1, numSchedules);
     dailyFlipToTurnoverList = NaN(1, numSchedules);
+    dailyOperatorIdleToTurnoverList = NaN(1, numSchedules);
+    dailyLabFlipToOperatorTurnoverList = NaN(1, numSchedules);
     dailyAvgConcurrentLabsList = NaN(1, numSchedules);
+    dailyTotalOperatorIdleList = zeros(1, numSchedules);
+    dailyLabTurnoverList = zeros(1, numSchedules);
+    dailyOperatorTurnoverList = zeros(1, numSchedules);
     
     % Get all unique operators across all schedules for consistent arrays
     allOperators = {};
@@ -504,7 +509,7 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
         if isfield(schedule, 'operators')
             
             % Calculate operator idle times and lab flips
-            [dayIdleStats, dayFlipStats, dayLabFlipsCount] = analyzeOperatorIdleTimeAndFlips(schedule.operators, schedule.labs);
+            [dayIdleStats, dayFlipStats, dayLabFlipsCount, dayOperatorTurnoverStats] = analyzeOperatorIdleTimeAndFlips(schedule.operators, schedule.labs);
             
             % Store daily lab flips for this date
             dailyLabFlips(i) = dayLabFlipsCount;
@@ -521,8 +526,8 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
                 totalOperatorIdle = 0;
             end
 
-            % Compute turnovers, room busy time (setup+proc+post), active labs, and fallback makespan bounds
-            totalTurnovers = 0;
+            % Compute explicit lab/operator turnovers, room busy time (setup+proc+post), active labs, and fallback makespan bounds
+            labTurnovers = 0;
             totalRoomBusyTime = 0;
             numLabsActive = 0;
             earliestStart = inf;
@@ -532,7 +537,7 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
                     labCases = schedule.labs{labIdx};
                     if ~isempty(labCases)
                         numLabsActive = numLabsActive + 1;
-                        totalTurnovers = totalTurnovers + max(length(labCases) - 1, 0);
+                        labTurnovers = labTurnovers + max(length(labCases) - 1, 0);
                         for c = 1:length(labCases)
                             if isfield(labCases(c), 'startTime') && isfield(labCases(c), 'endTime')
                                 totalRoomBusyTime = totalRoomBusyTime + max(labCases(c).endTime - labCases(c).startTime, 0);
@@ -552,13 +557,30 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
                 makespanDay = latestEnd - earliestStart;
             end
 
-            % Ratios (NaN when turnovers = 0)
-            if totalTurnovers > 0
-                idleToTurnover = totalOperatorIdle / totalTurnovers;
-                flipToTurnover = dayLabFlipsCount / totalTurnovers;
+            operatorTurnovers = 0;
+            try
+                turnoverVals = values(dayOperatorTurnoverStats);
+                if ~isempty(turnoverVals)
+                    operatorTurnovers = sum(cell2mat(turnoverVals));
+                end
+            catch
+                operatorTurnovers = 0;
+            end
+
+            % Ratios (NaN when the relevant denominator = 0)
+            if labTurnovers > 0
+                idleToTurnover = totalOperatorIdle / labTurnovers;
+                flipToTurnover = dayLabFlipsCount / labTurnovers;
             else
                 idleToTurnover = NaN;
                 flipToTurnover = NaN;
+            end
+            if operatorTurnovers > 0
+                operatorIdleToTurnover = totalOperatorIdle / operatorTurnovers;
+                labFlipToOperatorTurnover = dayLabFlipsCount / operatorTurnovers;
+            else
+                operatorIdleToTurnover = NaN;
+                labFlipToOperatorTurnover = NaN;
             end
 
             % Avg concurrent labs includes setup+proc+post
@@ -586,10 +608,15 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             dayEff = struct();
             dayEff.overallDeptTotalOperatorIdleTimeDaily = totalOperatorIdle;
             dayEff.overallDeptMedianOperatorIdleTimeDaily = medianOperatorIdle;
-            dayEff.overallDeptTotalTurnoversDaily = totalTurnovers;
+            dayEff.overallDeptTotalTurnoversDaily = labTurnovers; % Compatibility alias: lab turnovers
             dayEff.overallDeptIdleToTurnoverRatioDaily = idleToTurnover;
             dayEff.overallDeptTotalLabFlipsDaily = dayLabFlipsCount;
             dayEff.overallDeptFlipToTurnoverRatioDaily = flipToTurnover;
+            dayEff.overallDeptLabTurnoversDaily = labTurnovers;
+            dayEff.overallDeptOperatorTurnoversDaily = operatorTurnovers;
+            dayEff.overallDeptOperatorIdlePerOperatorTurnoverDaily = operatorIdleToTurnover;
+            dayEff.overallDeptLabFlipPerOperatorTurnoverDaily = labFlipToOperatorTurnover;
+            dayEff.overallDeptLabFlipPerLabTurnoverDaily = flipToTurnover;
             dayEff.overallDeptMakespanDaily = makespanDay;
             dayEff.overallDeptTotalRoomBusyTimeDaily = totalRoomBusyTime;
             dayEff.overallDeptAvgConcurrentLabsDaily = avgConcurrentLabs;
@@ -680,7 +707,12 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             % Collect for summary/correlation
             dailyIdleToTurnoverList(i) = idleToTurnover;
             dailyFlipToTurnoverList(i) = flipToTurnover;
+            dailyOperatorIdleToTurnoverList(i) = operatorIdleToTurnover;
+            dailyLabFlipToOperatorTurnoverList(i) = labFlipToOperatorTurnover;
             dailyAvgConcurrentLabsList(i) = avgConcurrentLabs;
+            dailyTotalOperatorIdleList(i) = totalOperatorIdle;
+            dailyLabTurnoverList(i) = labTurnovers;
+            dailyOperatorTurnoverList(i) = operatorTurnovers;
             
             % Update statistics for operators active on this day
             activeOperators = keys(schedule.operators);
@@ -794,25 +826,72 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     dailySummary.nDays = numSchedules;
     validIdle = isfinite(dailyIdleToTurnoverList);
     validFlip = isfinite(dailyFlipToTurnoverList);
+    validOperatorIdle = isfinite(dailyOperatorIdleToTurnoverList);
+    validOperatorFlip = isfinite(dailyLabFlipToOperatorTurnoverList);
     validConc = isfinite(dailyAvgConcurrentLabsList);
     dailySummary.nDaysWithTurnovers = sum(validIdle);
+    dailySummary.nDaysWithLabTurnovers = sum(dailyLabTurnoverList > 0);
+    dailySummary.nDaysWithOperatorTurnovers = sum(dailyOperatorTurnoverList > 0);
+    dailySummary.totalOperatorIdleMinutes = sum(dailyTotalOperatorIdleList, 'omitnan');
+    dailySummary.totalLabTurnovers = sum(dailyLabTurnoverList, 'omitnan');
+    dailySummary.totalOperatorTurnovers = sum(dailyOperatorTurnoverList, 'omitnan');
+    dailySummary.totalLabFlips = sum(dailyLabFlips, 'omitnan');
 
     if any(validIdle)
         v = dailyIdleToTurnoverList(validIdle);
         dailySummary.meanIdleToTurnover = mean(v);
         dailySummary.stdIdleToTurnover = std(v);
+        dailySummary.meanOperatorIdlePerLabTurnover = mean(v);
+        dailySummary.stdOperatorIdlePerLabTurnover = std(v);
     else
         dailySummary.meanIdleToTurnover = NaN;
         dailySummary.stdIdleToTurnover = NaN;
+        dailySummary.meanOperatorIdlePerLabTurnover = NaN;
+        dailySummary.stdOperatorIdlePerLabTurnover = NaN;
     end
     if any(validFlip)
         v = dailyFlipToTurnoverList(validFlip);
         dailySummary.meanFlipToTurnover = mean(v);
         dailySummary.stdFlipToTurnover = std(v);
+        dailySummary.meanLabFlipPerLabTurnover = mean(v);
+        dailySummary.stdLabFlipPerLabTurnover = std(v);
     else
         dailySummary.meanFlipToTurnover = NaN;
         dailySummary.stdFlipToTurnover = NaN;
+        dailySummary.meanLabFlipPerLabTurnover = NaN;
+        dailySummary.stdLabFlipPerLabTurnover = NaN;
     end
+    if any(validOperatorIdle)
+        v = dailyOperatorIdleToTurnoverList(validOperatorIdle);
+        dailySummary.meanOperatorIdlePerOperatorTurnover = mean(v);
+        dailySummary.stdOperatorIdlePerOperatorTurnover = std(v);
+    else
+        dailySummary.meanOperatorIdlePerOperatorTurnover = NaN;
+        dailySummary.stdOperatorIdlePerOperatorTurnover = NaN;
+    end
+    if any(validOperatorFlip)
+        v = dailyLabFlipToOperatorTurnoverList(validOperatorFlip);
+        dailySummary.meanLabFlipPerOperatorTurnover = mean(v);
+        dailySummary.stdLabFlipPerOperatorTurnover = std(v);
+    else
+        dailySummary.meanLabFlipPerOperatorTurnover = NaN;
+        dailySummary.stdLabFlipPerOperatorTurnover = NaN;
+    end
+    if dailySummary.totalOperatorTurnovers > 0
+        dailySummary.aggregateOperatorIdlePerOperatorTurnover = dailySummary.totalOperatorIdleMinutes / dailySummary.totalOperatorTurnovers;
+        dailySummary.aggregateLabFlipPerOperatorTurnover = dailySummary.totalLabFlips / dailySummary.totalOperatorTurnovers;
+    else
+        dailySummary.aggregateOperatorIdlePerOperatorTurnover = NaN;
+        dailySummary.aggregateLabFlipPerOperatorTurnover = NaN;
+    end
+    if dailySummary.totalLabTurnovers > 0
+        dailySummary.aggregateOperatorIdlePerLabTurnover = dailySummary.totalOperatorIdleMinutes / dailySummary.totalLabTurnovers;
+        dailySummary.aggregateLabFlipPerLabTurnover = dailySummary.totalLabFlips / dailySummary.totalLabTurnovers;
+    else
+        dailySummary.aggregateOperatorIdlePerLabTurnover = NaN;
+        dailySummary.aggregateLabFlipPerLabTurnover = NaN;
+    end
+    dailySummary.primaryOperatorIdleMetric = 'aggregateOperatorIdlePerOperatorTurnover';
     if any(validConc)
         v = dailyAvgConcurrentLabsList(validConc);
         dailySummary.meanAvgConcurrentLabs = mean(v);
@@ -848,9 +927,17 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
 
     if showStats
         fprintf('\n--- Daily Department Efficiency Summary ---\n');
-        fprintf('  Days analyzed: %d (with turnovers: %d)\n', dailySummary.nDays, dailySummary.nDaysWithTurnovers);
-        fprintf('  Idle/Turnover (min/turnover): mean %.2f, std %.2f\n', dailySummary.meanIdleToTurnover, dailySummary.stdIdleToTurnover);
-        fprintf('  Flip/Turnover: mean %.2f, std %.2f\n', dailySummary.meanFlipToTurnover, dailySummary.stdFlipToTurnover);
+        fprintf('  Days analyzed: %d (lab turnover days: %d, operator turnover days: %d)\n', ...
+            dailySummary.nDays, dailySummary.nDaysWithLabTurnovers, dailySummary.nDaysWithOperatorTurnovers);
+        fprintf('  Operator idle/operator turnover (weighted aggregate): %.2f min/turnover\n', ...
+            dailySummary.aggregateOperatorIdlePerOperatorTurnover);
+        fprintf('  Operator idle/operator turnover (mean daily): %.2f±%.2f min/turnover\n', ...
+            dailySummary.meanOperatorIdlePerOperatorTurnover, dailySummary.stdOperatorIdlePerOperatorTurnover);
+        fprintf('  Operator idle/lab turnover (legacy mean daily): %.2f±%.2f min/turnover\n', ...
+            dailySummary.meanOperatorIdlePerLabTurnover, dailySummary.stdOperatorIdlePerLabTurnover);
+        fprintf('  Lab flips/operator turnover (weighted aggregate): %.2f\n', dailySummary.aggregateLabFlipPerOperatorTurnover);
+        fprintf('  Lab flips/lab turnover (legacy mean daily): %.2f±%.2f\n', ...
+            dailySummary.meanLabFlipPerLabTurnover, dailySummary.stdLabFlipPerLabTurnover);
         fprintf('  Avg concurrent labs (setup+proc+post): mean %.2f, std %.2f\n', dailySummary.meanAvgConcurrentLabs, dailySummary.stdAvgConcurrentLabs);
         ci = dailySummary.corrIdle_vs_FlipTurnover;
         fprintf('  Corr Idle vs Flip/Turnover: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', ci.pearson_r, ci.pearson_p, ci.spearman_r, ci.spearman_p);
@@ -2041,10 +2128,11 @@ function displayOperatorIdleTimeAndFlipAnalysis(operatorIdleStats, operatorFlipS
 end
 
 %% Operator Idle Time and Lab Flip Analysis
-function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips(operators, labs)
+function [idleStats, flipStats, totalLabFlips, operatorTurnoverStats] = analyzeOperatorIdleTimeAndFlips(operators, labs)
     % Initialize outputs
     idleStats = containers.Map();
     flipStats = containers.Map();
+    operatorTurnoverStats = containers.Map();
     totalLabFlips = 0;
     
     operatorNames = keys(operators);
@@ -2061,8 +2149,10 @@ function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips
             % Multiple cases - initialize stats and analyze idle time and lab flips
             idleStats(opName) = 0;
             flipStats(opName) = 0;
+            operatorTurnoverStats(opName) = 0;
             totalIdleTime = 0;
             labFlipCount = 0;
+            operatorTurnoverCount = 0;
             
             % Sort cases by start time
             if isfield(opSchedule(1), 'caseInfo')
@@ -2081,12 +2171,14 @@ function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips
                 for j = 1:length(sortedSchedule)-1
                     currentCase = sortedSchedule(j);
                     nextCase = sortedSchedule(j+1);
+                    hasTurnover = false;
                     
                     if isfield(currentCase.caseInfo, 'procEndTime') && isfield(nextCase.caseInfo, 'procStartTime')
                         idleTime = nextCase.caseInfo.procStartTime - currentCase.caseInfo.procEndTime;
                         if idleTime > 0
                             totalIdleTime = totalIdleTime + idleTime;
                         end
+                        hasTurnover = true;
                     end
                     
                     % Check for lab flip (different labs for consecutive cases)
@@ -2096,11 +2188,16 @@ function [idleStats, flipStats, totalLabFlips] = analyzeOperatorIdleTimeAndFlips
                             totalLabFlips = totalLabFlips + 1;
                         end
                     end
+
+                    if hasTurnover
+                        operatorTurnoverCount = operatorTurnoverCount + 1;
+                    end
                 end
             end
             
             idleStats(opName) = totalIdleTime;
             flipStats(opName) = labFlipCount;
+            operatorTurnoverStats(opName) = operatorTurnoverCount;
         end
     end
     
@@ -2636,6 +2733,14 @@ for i = 1:numOperators
         opMetrics.minIdleTimePerTurnover = NaN;
         opMetrics.maxIdleTimePerTurnover = NaN;
     end
+
+    % Explicit metric-family aliases. Legacy names are operator-centric here:
+    % daily idle and flips divided by same-operator consecutive case transitions.
+    opMetrics.avgOperatorIdlePerOperatorTurnover = opMetrics.avgIdleTimePerTurnover;
+    opMetrics.medianOperatorIdlePerOperatorTurnover = opMetrics.medianIdleTimePerTurnover;
+    opMetrics.stdOperatorIdlePerOperatorTurnover = opMetrics.stdIdleTimePerTurnover;
+    opMetrics.avgLabFlipPerOperatorTurnoverRatio = opMetrics.avgFlipToTurnoverRatio;
+    opMetrics.medianLabFlipPerOperatorTurnoverRatio = opMetrics.medianFlipToTurnoverRatio;
     
     % Set other metrics to defaults (not available from current data)
     opMetrics.avgOvertimePerDay = 0; % Would need schedule times to calculate

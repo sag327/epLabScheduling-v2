@@ -12,7 +12,7 @@ function [historicalData, historicalSchedules] = loadHistoricalDataFromFile(vara
 %   FilePath - Path to Excel file containing historical procedure data
 %          [    Default: 'procedureDurationsB.xlsx'
 %   CreateSchedules - Whether to reconstruct historical schedules (default: true)
-%   TurnoverTime - Estimated turnover time for historical schedules (default: 15 minutes)
+%   TurnoverTime - Optional fallback turnover time for cases missing actual timing (default: 0 minutes)
 %   Debug - Show debug output during schedule reconstruction (default: false)
 %
 % Outputs:
@@ -24,7 +24,7 @@ function [historicalData, historicalSchedules] = loadHistoricalDataFromFile(vara
 p = inputParser;
 addOptional(p, 'FilePath', 'procedureDurationsB.xlsx', @(x) ischar(x) || isstring(x));
 addParameter(p, 'CreateSchedules', true, @islogical);
-addParameter(p, 'TurnoverTime', 15, @(x) isnumeric(x) && x >= 0);
+addParameter(p, 'TurnoverTime', 0, @(x) isnumeric(x) && x >= 0);
 addParameter(p, 'Debug', false, @islogical);
 parse(p, varargin{:});
 
@@ -177,23 +177,26 @@ historicalData.anesthesiaTime = rawData.(findColumn({'In_Room_to_Anesthesia_Indu
 procedureStartTimestamps = rawData.(findColumn({'Procedure_Start_Date_and_Time', 'ProcedureStartDateAndTime', 'Procedure Start Date and Time'}));
 procedureCompleteTimestamps = rawData.(findColumn({'Procedure_Complete_Date_and_Time', 'ProcedureCompleteDateAndTime', 'Procedure Complete Date and Time'}));
 
-% Filter out cases with missing start times before processing
+% Filter out cases with missing observed procedure timing before processing
 validStartTimeIndices = ~ismissing(procedureStartTimestamps);
-fprintf('Filtering out %d cases with missing start times (keeping %d of %d cases)\n', ...
-    sum(~validStartTimeIndices), sum(validStartTimeIndices), length(validStartTimeIndices));
+validCompleteTimeIndices = ~ismissing(procedureCompleteTimestamps);
+validTimingIndices = validStartTimeIndices & validCompleteTimeIndices;
+fprintf('Filtering out %d cases with missing start times and %d cases with missing complete times (keeping %d of %d cases)\n', ...
+    sum(~validStartTimeIndices), sum(validStartTimeIndices & ~validCompleteTimeIndices), ...
+    sum(validTimingIndices), length(validTimingIndices));
 
 % Apply filter to all data fields
 fieldNames = fieldnames(historicalData);
 for i = 1:length(fieldNames)
     field = fieldNames{i};
-    if length(historicalData.(field)) == length(validStartTimeIndices)
-        historicalData.(field) = historicalData.(field)(validStartTimeIndices);
+    if length(historicalData.(field)) == length(validTimingIndices)
+        historicalData.(field) = historicalData.(field)(validTimingIndices);
     end
 end
 
 % Also filter the timestamp arrays
-procedureStartTimestamps = procedureStartTimestamps(validStartTimeIndices);
-procedureCompleteTimestamps = procedureCompleteTimestamps(validStartTimeIndices);
+procedureStartTimestamps = procedureStartTimestamps(validTimingIndices);
+procedureCompleteTimestamps = procedureCompleteTimestamps(validTimingIndices);
 
 % Convert timestamps to time of day (duration from midnight)
 historicalData.procedureStartTimeOfDay = timeofday(procedureStartTimestamps);
@@ -292,6 +295,7 @@ fieldDescriptions.procedureStartTimeOfDay = 'Time of day when procedure started 
 fieldDescriptions.procedureCompleteTimeOfDay = 'Time of day when procedure completed (duration from midnight)';
 fieldDescriptions.procedureStartTimestamp = 'Full timestamp when procedure started';
 fieldDescriptions.procedureCompleteTimestamp = 'Full timestamp when procedure completed';
+fieldDescriptions.turnoverTime = 'Historical turnover is not imputed by default; room gaps are derived from observed out-of-room to next in-room timing when schedules are reconstructed';
 
 % Save descriptions to separate file
 save('./data/historicalEPDataDescriptions.mat', 'fieldDescriptions');
@@ -440,7 +444,20 @@ for name = possibleNames
         return;
     end
 end
+normalizedAvailable = cellfun(@normalizeColumnName, availableColumns, 'UniformOutput', false);
+for name = possibleNames
+    normalizedName = normalizeColumnName(name{1});
+    matchIdx = find(strcmp(normalizedAvailable, normalizedName), 1);
+    if ~isempty(matchIdx)
+        columnName = availableColumns{matchIdx};
+        return;
+    end
+end
 if isempty(columnName)
     error('Could not find column matching any of: %s', strjoin(possibleNames, ', '));
 end
+end
+
+function normalized = normalizeColumnName(name)
+normalized = lower(regexprep(char(name), '[^a-zA-Z0-9]', ''));
 end

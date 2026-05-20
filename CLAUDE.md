@@ -65,7 +65,7 @@ matlab -batch "addpath('scripts'); config=configureExperiment(); results=runSche
 - **Integration:** Uses existing working scripts for reliability
 
 ✅ **New Features Added:**
-- **Room turnover time:** Configurable parameter (default 15 minutes)
+- **Historical turnover handling:** Observed historical schedules do not append synthetic turnover by default; room gaps are derived from observed timing
 - **Comprehensive visualization:** Gantt charts with operator timelines
 - **Detailed metrics:** Lab utilization, idle time, overtime analysis
 
@@ -78,7 +78,7 @@ matlab -batch "addpath('scripts'); config=configureExperiment(); results=runSche
 % Add paths
 addpath('scripts');
 
-% Default 15-minute turnover
+% Prospective/optimized schedules can use configured turnover
 [schedule, results] = scheduleHistoricalCases(cases);
 
 % Custom 30-minute turnover
@@ -86,6 +86,18 @@ addpath('scripts');
 
 % Historical data re-optimization
 [schedule, results] = rescheduleHistoricalCases(historicalData, 'NumLabs', 3, 'TurnoverTime', 15);
+```
+
+### Retrospective Historical Analysis
+```matlab
+% Historical reconstruction uses observed in-room/procedure/out-room times
+% without appending synthetic turnover by default
+[historicalData, historicalSchedules] = loadHistoricalDataFromFile('clinicalData/testProcedureDurations-3day.xlsx');
+analysisResults = analyzeHistoricalData(historicalData, 'HistoricalSchedules', historicalSchedules);
+summary = analysisResults.scheduleAnalysis.dailyEfficiency.summary;
+
+fprintf('Operator idle/operator turnover: %.1f min\n', summary.aggregateOperatorIdlePerOperatorTurnover);
+fprintf('Lab flips/operator turnover: %.2f\n', summary.aggregateLabFlipPerOperatorTurnover);
 ```
 
 ### Experiment Framework Usage

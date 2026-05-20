@@ -133,6 +133,11 @@ data.P75IdleTimePerTurnover = NaN(numOperators, 1);
 data.P90IdleTimePerTurnover = NaN(numOperators, 1);
 data.MinIdleTimePerTurnover = NaN(numOperators, 1);
 data.MaxIdleTimePerTurnover = NaN(numOperators, 1);
+data.AvgOperatorIdlePerOperatorTurnover = NaN(numOperators, 1);
+data.MedianOperatorIdlePerOperatorTurnover = NaN(numOperators, 1);
+data.StdOperatorIdlePerOperatorTurnover = NaN(numOperators, 1);
+data.AvgLabFlipPerOperatorTurnoverRatio = NaN(numOperators, 1);
+data.MedianLabFlipPerOperatorTurnoverRatio = NaN(numOperators, 1);
 
 % Multi-procedure day metrics
 data.MultiProcedureDays = zeros(numOperators, 1);
@@ -290,6 +295,11 @@ for i = 1:numOperators
     data.P90IdleTimePerTurnover(i) = getField(opMetrics, 'p90IdleTimePerTurnover', NaN);
     data.MinIdleTimePerTurnover(i) = getField(opMetrics, 'minIdleTimePerTurnover', NaN);
     data.MaxIdleTimePerTurnover(i) = getField(opMetrics, 'maxIdleTimePerTurnover', NaN);
+    data.AvgOperatorIdlePerOperatorTurnover(i) = getField(opMetrics, 'avgOperatorIdlePerOperatorTurnover', data.AvgIdleTimePerTurnover(i));
+    data.MedianOperatorIdlePerOperatorTurnover(i) = getField(opMetrics, 'medianOperatorIdlePerOperatorTurnover', data.MedianIdleTimePerTurnover(i));
+    data.StdOperatorIdlePerOperatorTurnover(i) = getField(opMetrics, 'stdOperatorIdlePerOperatorTurnover', data.StdIdleTimePerTurnover(i));
+    data.AvgLabFlipPerOperatorTurnoverRatio(i) = getField(opMetrics, 'avgLabFlipPerOperatorTurnoverRatio', data.AvgFlipToTurnoverRatio(i));
+    data.MedianLabFlipPerOperatorTurnoverRatio(i) = getField(opMetrics, 'medianLabFlipPerOperatorTurnoverRatio', data.MedianFlipToTurnoverRatio(i));
     
     % Multi-procedure day metrics
     data.MultiProcedureDays(i) = getField(opMetrics, 'multiProcedureDays', 0);
@@ -642,6 +652,11 @@ descriptions.P75IdleTimePerTurnover = '75th percentile of idle time per turnover
 descriptions.P90IdleTimePerTurnover = '90th percentile of idle time per turnover (minutes)';
 descriptions.MinIdleTimePerTurnover = 'Minimum idle time per turnover (minutes)';
 descriptions.MaxIdleTimePerTurnover = 'Maximum idle time per turnover (minutes)';
+descriptions.AvgOperatorIdlePerOperatorTurnover = 'Average operator idle time per same-operator case transition (minutes)';
+descriptions.MedianOperatorIdlePerOperatorTurnover = 'Median operator idle time per same-operator case transition (minutes)';
+descriptions.StdOperatorIdlePerOperatorTurnover = 'Standard deviation of operator idle time per same-operator case transition (minutes)';
+descriptions.AvgLabFlipPerOperatorTurnoverRatio = 'Average lab flip ratio per same-operator case transition (%)';
+descriptions.MedianLabFlipPerOperatorTurnoverRatio = 'Median lab flip ratio per same-operator case transition (%)';
 
 % Multi-procedure day metrics
 descriptions.MultiProcedureDays = 'Number of days with multiple procedures';
