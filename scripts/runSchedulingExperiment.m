@@ -30,7 +30,7 @@ function results = runSchedulingExperiment(config, varargin)
     
     % Add paths (already in scripts directory)
     addpath('data');
-    addpath('clinicalData');
+    %addpath('clinicalData');
     
     % Create timestamped output directory
     if isempty(outputDir)

@@ -293,7 +293,6 @@ end
 titleWithDate = sprintf('%s%s', chartTitle, scheduleDate);
 title(ax1, titleWithDate, 'FontSize', 16, 'FontWeight', 'bold', 'Color', 'black');
 xlabel(ax1, '');  % No x-label for main chart
-ylabel(ax1, 'Time of Day', 'Color', 'black');
 
 % Add summary statistics
 summaryText = sprintf('Cases: %d | Labs: %d | Operators: %d | Makespan: %.1f hrs', ...
