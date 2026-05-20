@@ -1,27 +1,31 @@
 function plotAnalysisResults(analysisResults, varargin)
-% Create subplots showing operator performance metrics from multi-procedure days
-% Uses pre-calculated flip-to-turnover ratios and correlates with selected procedure metrics
+% Create retrospective visualizations for operator and department efficiency metrics.
+% Uses explicit denominator labels so operator-turnover and lab-turnover
+% metrics are not conflated in plots.
 % Version: 2.2.0
 %
 % Available Plots and Metrics
 % - Operator bar charts (always rendered):
-%   - Proportion of turnovers that are flips by operator (% of turnovers)
+%   - Lab flips per operator turnover by operator (% of same-operator turnovers)
 %   - Median idle time per turnover by operator (minutes per turnover)
 %
 % - Correlation plot (enable with 'CreateCorrelationPlot', true):
-%   - User selects a procedure and a procedure-time metric to correlate against flip-to-turnover ratio
+%   - User selects a procedure and a procedure-time metric to correlate against
+%     lab flips per operator turnover
 %   - Selectable procedure-time metrics per operator for the chosen procedure:
 %       'mean', 'median', 'std', 'min', 'max', 'p25', 'p75', 'p90'
 %
 % - Time series plot (enable with 'CreateTimeSeriesPlot', true):
-%   - Flip-to-turnover ratio over time by operator, plus overall average trend
+%   - Operator flip ratio over time by operator, plus average operator flip ratio trend
+%   - Separate department time series for lab flips per lab turnover
 %
 % - Box plots (enable with 'CreateBoxPlots', true):
-%   - Distribution of operator flip-to-turnover ratios (%) and median idle time/turnover (minutes)
+%   - Distribution of operator lab-flips-per-operator-turnover ratios (%)
+%   - Distribution of median idle time/turnover (minutes)
 %
 % - Daily department-wide scatter (enable with 'CreateDailyDeptScatter', true):
-%   - Daily overall department Idle/Turnover (min per turnover) vs:
-%       • Flip/Turnover (flips per turnover)
+%   - Daily overall department Idle/Lab Turnover (min per lab turnover) vs:
+%       • Lab Flips/Lab Turnover
 %       • Average Concurrent Labs (includes setup + procedure + post times)
 %
 % Inputs:
@@ -52,9 +56,9 @@ addParameter(p, 'SelectedMetric', '', @ischar);
 parse(p, varargin{:});
 
 doCreateCorrelationPlot = p.Results.CreateCorrelationPlot;
-createTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
-createBoxPlots = p.Results.CreateBoxPlots;
-createDailyDeptScatter = p.Results.CreateDailyDeptScatter;
+doCreateTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
+doCreateBoxPlots = p.Results.CreateBoxPlots;
+doCreateDailyDeptScatter = p.Results.CreateDailyDeptScatter;
 selectedProcedure = p.Results.SelectedProcedure;
 selectedMetric = p.Results.SelectedMetric;
 
@@ -150,15 +154,15 @@ validOperators = validOperators(sortIdx);
 
 flipsPerTurnoverRatio = flipsPerTurnoverRatio .* 100;
 
-% Create first figure: Proportion of Turnovers that are Flips
+% Create first figure: Lab flips per operator turnover by operator
 figure('Position', [100, 100, 1400, 1000]);
 
 bar(validOperators, flipsPerTurnoverRatio);
 set(gca, 'XTickLabel', validOperators);
 xtickangle(45);
 xlabel('Operator');
-ylabel('% of Turnovers');
-title('Proportion of Turnovers that are Flips by Operator (Multi-Procedure Days Only)');
+ylabel('Lab Flips per Operator Turnover (%)');
+title('Lab Flips per Operator Turnover by Operator (Multi-Procedure Days Only)');
 grid on;
 % Add value labels
 for i = 1:length(flipsPerTurnoverRatio)
@@ -204,17 +208,17 @@ if doCreateCorrelationPlot
 end
 
 % Create time series plot if requested
-if createTimeSeriesPlot
+if doCreateTimeSeriesPlot
     createTimeSeriesPlot(analysisResults);
 end
 
 % Create box plots if requested
-if createBoxPlots
+if doCreateBoxPlots
     createBoxPlotsForMetrics(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators);
 end
 
 % Create daily department-wide scatter plots if requested
-if createDailyDeptScatter
+if doCreateDailyDeptScatter
     createDailyDeptScatterPlots(analysisResults);
 end
 
@@ -296,7 +300,7 @@ metricDescriptions = {
 };
 
 % Show metric selection dialog
-[metricIdx, ok] = listdlg('PromptString', 'Select a metric to correlate with flip-to-turnover ratio:', ...
+[metricIdx, ok] = listdlg('PromptString', 'Select a metric to correlate with lab flips per operator turnover:', ...
                           'SelectionMode', 'single', ...
                           'ListString', metricDescriptions, ...
                           'ListSize', [500, 250], ...
@@ -317,7 +321,7 @@ function [correlationValues, correlationOperators, correlationFlipRatios] = ...
 % Outputs:
 %   correlationValues - array of metric values for correlation
 %   correlationOperators - cell array of operator names with valid data
-%   correlationFlipRatios - array of flip-to-turnover ratios for correlation
+%   correlationFlipRatios - array of lab-flips-per-operator-turnover ratios for correlation
 
 correlationValues = [];
 correlationOperators = {};
@@ -363,7 +367,7 @@ function createCorrelationPlot(correlationValues, correlationOperators, correlat
 % Inputs:
 %   correlationValues - array of metric values
 %   correlationOperators - cell array of operator names  
-%   correlationFlipRatios - array of flip-to-turnover ratios
+%   correlationFlipRatios - array of lab-flips-per-operator-turnover ratios
 %   selectedProcedure - string, name of selected procedure
 %   selectedMetric - string, name of selected metric
 %   analysisResults - full analysis results for reselection
@@ -403,11 +407,11 @@ if length(correlationValues) > 2
     plot(xTrend, yTrend, 'r--', 'LineWidth', 2);
     
     % Create title with correlation
-    titleStr = sprintf('%s %s vs Flip-to-Turnover Ratio (r = %.3f)', selectedProcedure, upper(selectedMetric), rValue);
+    titleStr = sprintf('%s %s vs Lab Flips per Operator Turnover (r = %.3f)', selectedProcedure, upper(selectedMetric), rValue);
     title(titleStr);
     
     % Display correlation in console
-    fprintf('Correlation between %s %s and flip-to-turnover ratio: r = %.3f\n', selectedProcedure, selectedMetric, rValue);
+    fprintf('Correlation between %s %s and lab flips per operator turnover: r = %.3f\n', selectedProcedure, selectedMetric, rValue);
     if abs(rValue) > 0.5
         fprintf('Strong correlation detected!\n');
     elseif abs(rValue) > 0.3
@@ -416,7 +420,7 @@ if length(correlationValues) > 2
         fprintf('Weak correlation.\n');
     end
 else
-    title(sprintf('%s %s vs Flip-to-Turnover Ratio', selectedProcedure, upper(selectedMetric)));
+    title(sprintf('%s %s vs Lab Flips per Operator Turnover', selectedProcedure, upper(selectedMetric)));
     fprintf('Not enough data points for correlation analysis (%d points)\n', length(correlationValues));
 end
 
@@ -478,11 +482,11 @@ if ~isempty(newProcedure) && ~isempty(newMetric)
             plot(xTrend, yTrend, 'r--', 'LineWidth', 2);
             
             % Create title with correlation
-            titleStr = sprintf('%s %s vs Flip-to-Turnover Ratio (r = %.3f)', newProcedure, upper(newMetric), rValue);
+            titleStr = sprintf('%s %s vs Lab Flips per Operator Turnover (r = %.3f)', newProcedure, upper(newMetric), rValue);
             title(titleStr);
             
             % Display correlation in console
-            fprintf('Correlation between %s %s and flip-to-turnover ratio: r = %.3f\n', newProcedure, newMetric, rValue);
+            fprintf('Correlation between %s %s and lab flips per operator turnover: r = %.3f\n', newProcedure, newMetric, rValue);
             if abs(rValue) > 0.5
                 fprintf('Strong correlation detected!\n');
             elseif abs(rValue) > 0.3
@@ -491,7 +495,7 @@ if ~isempty(newProcedure) && ~isempty(newMetric)
                 fprintf('Weak correlation.\n');
             end
         else
-            title(sprintf('%s %s vs Flip-to-Turnover Ratio', newProcedure, upper(newMetric)));
+            title(sprintf('%s %s vs Lab Flips per Operator Turnover', newProcedure, upper(newMetric)));
             fprintf('Not enough data points for correlation analysis (%d points)\n', length(newCorrelationValues));
         end
         
@@ -519,7 +523,9 @@ end
 end
 
 function createTimeSeriesPlot(analysisResults)
-% Create a time series plot showing flip-to-turnover ratios over time for all operators
+% Create time series plots for:
+% 1) operator lab-flips per operator turnover over time
+% 2) department lab-flips per lab turnover over time
 %
 % Input:
 %   analysisResults - structure returned by analyzeHistoricalData
@@ -565,7 +571,7 @@ if numOperators == 0 || numDates == 0
     return;
 end
 
-% Create new figure for time series plot
+% Create operator-focused figure
 figure('Position', [400, 400, 1400, 800]);
 
 % Calculate flip-to-turnover ratios for each operator on each day
@@ -617,31 +623,32 @@ for opIdx = 1:numOperators
     end
 end
 
-% Calculate and plot overall average
-overallAvg = nanmean(flipRatioMatrix, 1);
-validAvgData = ~isnan(overallAvg);
+% This is the unweighted average of valid operator daily ratios, not a
+% department-wide total-flips / total-turnovers calculation.
+avgOperatorFlipRatio = nanmean(flipRatioMatrix, 1);
+validAvgData = ~isnan(avgOperatorFlipRatio);
 if any(validAvgData)
-    plot(dateObjects(validAvgData), overallAvg(validAvgData), 'k-', 'LineWidth', 3, ...
-         'MarkerSize', 8, 'DisplayName', 'Overall Average');
+    plot(dateObjects(validAvgData), avgOperatorFlipRatio(validAvgData), 'k-', 'LineWidth', 3, ...
+         'MarkerSize', 8, 'DisplayName', 'Average Operator Flip Ratio');
 end
 
-title('Flip-to-Turnover Ratio Over Time by Operator');
+title('Operator Lab Flips per Operator Turnover Over Time');
 xlabel('Date');
-ylabel('Flip-to-Turnover Ratio (%)');
+ylabel('Lab Flips per Operator Turnover (%)');
 grid on;
 legend('Location', 'best', 'FontSize', 8);
 hold off;
 
-% Create second subplot showing just the overall trend
+% Create second subplot showing just the operator-average trend
 subplot(2, 1, 2);
 if any(validAvgData)
-    plot(dateObjects(validAvgData), overallAvg(validAvgData), 'ko-', 'LineWidth', 2, 'MarkerSize', 6);
+    plot(dateObjects(validAvgData), avgOperatorFlipRatio(validAvgData), 'ko-', 'LineWidth', 2, 'MarkerSize', 6);
     hold on;
     
     % Add trend line if we have enough points
     if sum(validAvgData) > 2
         validDates = dateObjects(validAvgData);
-        validValues = overallAvg(validAvgData);
+        validValues = avgOperatorFlipRatio(validAvgData);
         
         % Convert dates to numbers for polyfit
         dateNums = datenum(validDates);
@@ -658,40 +665,119 @@ if any(validAvgData)
             trendDirection = 'stable';
         end
         
-        fprintf('Overall flip-to-turnover ratio trend: %s (slope = %.3f%% per day)\n', trendDirection, p(1));
+        fprintf('Average operator flip-ratio trend: %s (slope = %.3f%% per day)\n', trendDirection, p(1));
     end
     
     hold off;
 end
 
-title('Overall Average Flip-to-Turnover Ratio Trend');
+title('Average Operator Flip Ratio Trend');
 xlabel('Date');
-ylabel('Average Flip-to-Turnover Ratio (%)');
+ylabel('Average Operator Flip Ratio (%)');
 grid on;
 
 % Add summary statistics
 if validOperatorCount > 0
-    fprintf('Time series plot created with %d operators across %d dates\n', validOperatorCount, sum(validAvgData));
+    fprintf('Operator time series plot created with %d operators across %d dates\n', validOperatorCount, sum(validAvgData));
     
     % Calculate and display summary statistics
     allValidRatios = flipRatioMatrix(~isnan(flipRatioMatrix));
     if ~isempty(allValidRatios)
-        fprintf('Summary statistics across all operators and dates:\n');
+        fprintf('Summary statistics across valid operator-day flip ratios:\n');
         fprintf('  Mean: %.1f%%\n', mean(allValidRatios));
         fprintf('  Median: %.1f%%\n', median(allValidRatios));
         fprintf('  Std Dev: %.1f%%\n', std(allValidRatios));
         fprintf('  Range: %.1f%% - %.1f%%\n', min(allValidRatios), max(allValidRatios));
     end
 else
-    fprintf('No valid time series data found for flip-to-turnover ratios\n');
+    fprintf('No valid operator time series data found for lab-flips-per-operator-turnover ratios\n');
 end
+
+createDepartmentFlipTimeSeriesPlot(analysisResults);
+end
+
+function createDepartmentFlipTimeSeriesPlot(analysisResults)
+% Plot department lab flips per lab turnover over time using the daily
+% department metric calculated in analyzeHistoricalData.
+
+if ~isfield(analysisResults, 'scheduleAnalysis') || ...
+   ~isfield(analysisResults.scheduleAnalysis, 'dailyEfficiency') || ...
+   ~isfield(analysisResults.scheduleAnalysis.dailyEfficiency, 'byDate') || ...
+   isempty(analysisResults.scheduleAnalysis.dailyEfficiency.byDate)
+    warning('Department daily efficiency metrics not available for department flip-ratio plot.');
+    return;
+end
+
+dailyEff = analysisResults.scheduleAnalysis.dailyEfficiency.byDate;
+dateKeys = keys(dailyEff);
+numDays = length(dateKeys);
+
+if numDays == 0
+    warning('No department daily efficiency entries found for department flip-ratio plot.');
+    return;
+end
+
+dateObjects = NaT(numDays, 1);
+deptFlipPerLabTurnover = NaN(numDays, 1);
+
+for i = 1:numDays
+    dateKey = dateKeys{i};
+    try
+        dateObjects(i) = datetime(dateKey, 'InputFormat', 'dd-MMM-yyyy');
+    catch
+        dateObjects(i) = datetime(dateKey);
+    end
+
+    d = dailyEff(dateKey);
+    if isfield(d, 'overallDeptFlipToTurnoverRatioDaily')
+        deptFlipPerLabTurnover(i) = d.overallDeptFlipToTurnoverRatioDaily * 100;
+    end
+end
+
+[dateObjects, sortIdx] = sort(dateObjects);
+deptFlipPerLabTurnover = deptFlipPerLabTurnover(sortIdx);
+validData = ~isnan(deptFlipPerLabTurnover);
+
+figure('Position', [450, 450, 1400, 500]);
+if any(validData)
+    plot(dateObjects(validData), deptFlipPerLabTurnover(validData), 'ko-', 'LineWidth', 2, 'MarkerSize', 6);
+    hold on;
+
+    if sum(validData) > 2
+        validDates = dateObjects(validData);
+        validValues = deptFlipPerLabTurnover(validData);
+        dateNums = datenum(validDates);
+        p = polyfit(dateNums, validValues, 1);
+        trendLine = polyval(p, dateNums);
+        plot(validDates, trendLine, 'r--', 'LineWidth', 2, 'DisplayName', 'Trend');
+
+        if p(1) > 0
+            trendDirection = 'increasing';
+        elseif p(1) < 0
+            trendDirection = 'decreasing';
+        else
+            trendDirection = 'stable';
+        end
+
+        fprintf('Department lab-flips-per-lab-turnover trend: %s (slope = %.3f%% per day)\n', trendDirection, p(1));
+    end
+
+    hold off;
+else
+    fprintf('No valid department daily lab-flips-per-lab-turnover values found.\n');
+end
+
+title('Department Lab Flips per Lab Turnover Over Time');
+xlabel('Date');
+ylabel('Lab Flips per Lab Turnover (%)');
+grid on;
 end
 
 function createBoxPlotsForMetrics(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators)
 % Create box and whisker plots for the two main metrics
 %
 % Inputs:
-%   flipsPerTurnoverRatio - array of flip-to-turnover ratios (%)
+%   flipsPerTurnoverRatio - array of lab-flips per operator-turnover ratios (%)
 %   medianIdleTimeToTurnoverRatio - array of idle time per turnover (minutes)
 %   validOperators - cell array of operator names
 
@@ -700,10 +786,10 @@ if isempty(flipsPerTurnoverRatio) || isempty(medianIdleTimeToTurnoverRatio)
     return;
 end
 
-% Create first box plot: Flip-to-Turnover Ratios
+% Create first box plot: Lab flips per operator turnover
 figure('Position', [300, 300, 800, 600]);
 boxplot(flipsPerTurnoverRatio,'Colors','k');
-ylabel('average flip/turnover (%)');
+ylabel('Average Lab Flips per Operator Turnover (%)');
 xlabel('');
 set(gca,'XTickLabel','all operators');
 grid off;
@@ -759,11 +845,11 @@ end
 
 function createDailyDeptScatterPlots(analysisResults)
 % Plot per-day department-wide daily efficiency relationships:
-% - Idle/Turnover vs Flip/Turnover
-% - Idle/Turnover vs Avg Concurrent Labs
-% - Flip/Turnover vs Makespan
+% - Idle/Lab Turnover vs Lab Flips/Lab Turnover
+% - Idle/Lab Turnover vs Avg Concurrent Labs
+% - Lab Flips/Lab Turnover vs Makespan
 % - Avg Concurrent Labs vs Makespan
-% - Avg Concurrent Labs vs Flip/Turnover
+% - Avg Concurrent Labs vs Lab Flips/Lab Turnover
 
 % Validate presence of daily efficiency results
 if ~isfield(analysisResults, 'scheduleAnalysis') || ...
@@ -821,14 +907,14 @@ totalCount = numDays;
 
 % === ROW 1: IDLE/TURNOVER ON Y-AXIS ===
 
-% Subplot (1,1): Flip/Turnover vs Idle/Turnover
+% Subplot (1,1): Lab Flips/Lab Turnover vs Idle/Lab Turnover
 subplot(3,3,1);
 mask1 = baseMask & isfinite(idlePerTurn) & isfinite(flipPerTurn);
 scatter(flipPerTurn(mask1), idlePerTurn(mask1), 50, 'filled');
 grid on;
-xlabel('Flip/Turnover (flips per turnover)');
-ylabel('Idle/Turnover (minutes per turnover)');
-title('Daily: Idle/Turnover vs Flip/Turnover');
+xlabel('Lab Flips/Lab Turnover (flips per lab turnover)');
+ylabel('Idle/Lab Turnover (minutes per lab turnover)');
+title('Daily: Idle/Lab Turnover vs Lab Flips/Lab Turnover');
 hold on;
 if sum(mask1) >= 2
     x = flipPerTurn(mask1);
@@ -843,14 +929,14 @@ if sum(mask1) >= 2
 end
 hold off;
 
-% Subplot (1,2): Avg Concurrent Labs vs Idle/Turnover
+% Subplot (1,2): Avg Concurrent Labs vs Idle/Lab Turnover
 subplot(3,3,2);
 mask2 = baseMask & isfinite(idlePerTurn) & isfinite(avgConcurrent);
 scatter(avgConcurrent(mask2), idlePerTurn(mask2), 50, 'filled');
 grid on;
 xlabel('Average Concurrent Labs (setup+proc+post)');
-ylabel('Idle/Turnover (minutes per turnover)');
-title('Daily: Idle/Turnover vs Avg Concurrent Labs');
+ylabel('Idle/Lab Turnover (minutes per lab turnover)');
+title('Daily: Idle/Lab Turnover vs Avg Concurrent Labs');
 hold on;
 if sum(mask2) >= 2
     x = avgConcurrent(mask2);
@@ -865,14 +951,14 @@ if sum(mask2) >= 2
 end
 hold off;
 
-% Subplot (1,3): Flip Potential vs Idle/Turnover
+% Subplot (1,3): Flip Potential vs Idle/Lab Turnover
 subplot(3,3,3);
 mask3 = baseMask & isfinite(idlePerTurn) & isfinite(flipPotential);
 scatter(flipPotential(mask3), idlePerTurn(mask3), 50, 'filled');
 grid on;
 xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
-ylabel('Idle/Turnover (minutes per turnover)');
-title('Daily: Idle/Turnover vs Flip Potential');
+ylabel('Idle/Lab Turnover (minutes per lab turnover)');
+title('Daily: Idle/Lab Turnover vs Flip Potential');
 hold on;
 if sum(mask3) >= 2
     x = flipPotential(mask3);
@@ -887,16 +973,16 @@ if sum(mask3) >= 2
 end
 hold off;
 
-% === ROW 2: FLIP/TURNOVER ON Y-AXIS ===
+% === ROW 2: LAB FLIPS / LAB TURNOVER ON Y-AXIS ===
 
-% Subplot (2,2): Avg Concurrent Labs vs Flip/Turnover
+% Subplot (2,2): Avg Concurrent Labs vs Lab Flips/Lab Turnover
 subplot(3,3,5);
 mask4 = baseMask & isfinite(avgConcurrent) & isfinite(flipPerTurn);
 scatter(avgConcurrent(mask4), flipPerTurn(mask4), 50, 'filled');
 grid on;
 xlabel('Average Concurrent Labs (setup+proc+post)');
-ylabel('Flip/Turnover (flips per turnover)');
-title('Daily: Flip/Turnover vs Avg Concurrent Labs');
+ylabel('Lab Flips/Lab Turnover (flips per lab turnover)');
+title('Daily: Lab Flips/Lab Turnover vs Avg Concurrent Labs');
 hold on;
 if sum(mask4) >= 2
     x = avgConcurrent(mask4);
@@ -911,14 +997,14 @@ if sum(mask4) >= 2
 end
 hold off;
 
-% Subplot (2,3): Flip Potential vs Flip/Turnover
+% Subplot (2,3): Flip Potential vs Lab Flips/Lab Turnover
 subplot(3,3,6);
 mask5 = baseMask & isfinite(flipPotential) & isfinite(flipPerTurn);
 scatter(flipPotential(mask5), flipPerTurn(mask5), 50, 'filled');
 grid on;
 xlabel('Flip Potential (Active Labs - Effective Outpatient Ops)');
-ylabel('Flip/Turnover (flips per turnover)');
-title('Daily: Flip/Turnover vs Flip Potential');
+ylabel('Lab Flips/Lab Turnover (flips per lab turnover)');
+title('Daily: Lab Flips/Lab Turnover vs Flip Potential');
 hold on;
 if sum(mask5) >= 2
     x = flipPotential(mask5);
@@ -935,14 +1021,14 @@ hold off;
 
 % === ROW 3: MAKESPAN ON Y-AXIS ===
 
-% Subplot (3,1): Flip/Turnover vs Makespan
+% Subplot (3,1): Lab Flips/Lab Turnover vs Makespan
 subplot(3,3,7);
 mask6 = baseMask & isfinite(flipPerTurn) & isfinite(makespan);
 scatter(flipPerTurn(mask6), makespan(mask6), 50, 'filled');
 grid on;
-xlabel('Flip/Turnover (flips per turnover)');
+xlabel('Lab Flips/Lab Turnover (flips per lab turnover)');
 ylabel('Makespan (minutes)');
-title('Daily: Makespan vs Flip/Turnover');
+title('Daily: Makespan vs Lab Flips/Lab Turnover');
 hold on;
 if sum(mask6) >= 2
     x = flipPerTurn(mask6);

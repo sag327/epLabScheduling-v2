@@ -16,7 +16,7 @@ function analysisResults = analyzeStatisticalDataset(statisticalData, varargin)
 %   'ProcedureTypes' - Cell array of specific procedure types to analyze 
 %                      (default: analyze all available)
 %   'TargetVariable' - Variable of interest for regression analysis 
-%                      (default: 'AvgFlipToTurnoverRatio')
+%                      (default: 'AvgLabFlipPerOperatorTurnoverRatio')
 %   'PerformRegression' - Perform multi-variable regression analysis (default: true)
 %   'Verbose' - Show detailed output (default: true)
 %   'ExportResults' - Export results to file (default: false)
@@ -52,7 +52,7 @@ addRequired(p, 'statisticalData', @isstruct);
 addParameter(p, 'MinProceduresPerOperator', 10, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'MinOperatorsPerProcedure', 5, @(x) isnumeric(x) && x > 0);
 addParameter(p, 'ProcedureTypes', {}, @iscell);
-addParameter(p, 'TargetVariable', 'AvgFlipToTurnoverRatio', @ischar);
+addParameter(p, 'TargetVariable', 'AvgLabFlipPerOperatorTurnoverRatio', @ischar);
 addParameter(p, 'PerformRegression', true, @islogical);
 addParameter(p, 'Verbose', true, @islogical);
 addParameter(p, 'ExportResults', false, @islogical);
@@ -344,7 +344,7 @@ end
 
 function regressionResults = performRegressionAnalysis(data, targetVariable, verbose)
 % Perform multi-variable regression analysis to identify correlates
-% of the target variable (default: AvgFlipToTurnoverRatio)
+% of the target variable (default: AvgLabFlipPerOperatorTurnoverRatio)
 
 regressionResults = struct();
 regressionResults.performed = true;
@@ -386,6 +386,8 @@ generalPerformanceMetrics = {
     'AvgWorkTimePerDay', 'MedianWorkTimePerDay', ...
     'AvgFlipToTurnoverRatio', 'MedianFlipToTurnoverRatio', 'StdFlipToTurnoverRatio', ...
     'P25FlipToTurnoverRatio', 'P75FlipToTurnoverRatio', 'P90FlipToTurnoverRatio', ...
+    'AvgLabFlipPerLabTurnoverRatio', 'MedianLabFlipPerLabTurnoverRatio', ...
+    'AvgLabFlipPerOperatorTurnoverRatio', 'MedianLabFlipPerOperatorTurnoverRatio', ...
     'AvgCasesPerHour', 'UtilizationRate', ...
     'AvgIdleTimePerTurnover', 'MedianIdleTimePerTurnover', 'StdIdleTimePerTurnover', ...
     'MultiProcedureDays', 'MultiProcedureDaysPct', 'DaysWithOvertime', 'DaysWithOvertimePct', ...

@@ -136,6 +136,8 @@ data.MaxIdleTimePerTurnover = NaN(numOperators, 1);
 data.AvgOperatorIdlePerOperatorTurnover = NaN(numOperators, 1);
 data.MedianOperatorIdlePerOperatorTurnover = NaN(numOperators, 1);
 data.StdOperatorIdlePerOperatorTurnover = NaN(numOperators, 1);
+data.AvgLabFlipPerLabTurnoverRatio = NaN(numOperators, 1);
+data.MedianLabFlipPerLabTurnoverRatio = NaN(numOperators, 1);
 data.AvgLabFlipPerOperatorTurnoverRatio = NaN(numOperators, 1);
 data.MedianLabFlipPerOperatorTurnoverRatio = NaN(numOperators, 1);
 
@@ -298,6 +300,8 @@ for i = 1:numOperators
     data.AvgOperatorIdlePerOperatorTurnover(i) = getField(opMetrics, 'avgOperatorIdlePerOperatorTurnover', data.AvgIdleTimePerTurnover(i));
     data.MedianOperatorIdlePerOperatorTurnover(i) = getField(opMetrics, 'medianOperatorIdlePerOperatorTurnover', data.MedianIdleTimePerTurnover(i));
     data.StdOperatorIdlePerOperatorTurnover(i) = getField(opMetrics, 'stdOperatorIdlePerOperatorTurnover', data.StdIdleTimePerTurnover(i));
+    data.AvgLabFlipPerLabTurnoverRatio(i) = getField(opMetrics, 'avgFlipToTurnoverRatio', NaN);
+    data.MedianLabFlipPerLabTurnoverRatio(i) = getField(opMetrics, 'medianFlipToTurnoverRatio', NaN);
     data.AvgLabFlipPerOperatorTurnoverRatio(i) = getField(opMetrics, 'avgLabFlipPerOperatorTurnoverRatio', data.AvgFlipToTurnoverRatio(i));
     data.MedianLabFlipPerOperatorTurnoverRatio(i) = getField(opMetrics, 'medianLabFlipPerOperatorTurnoverRatio', data.MedianFlipToTurnoverRatio(i));
     
@@ -632,14 +636,14 @@ descriptions.AvgWorkTimePerDay = 'Average total work time per day (minutes)';
 descriptions.MedianWorkTimePerDay = 'Median total work time per day (minutes)';
 
 % Efficiency metrics
-descriptions.AvgFlipToTurnoverRatio = 'Average flip-to-turnover ratio (%)';
-descriptions.MedianFlipToTurnoverRatio = 'Median flip-to-turnover ratio (%)';
-descriptions.StdFlipToTurnoverRatio = 'Standard deviation of flip-to-turnover ratio (%)';
-descriptions.P25FlipToTurnoverRatio = '25th percentile of flip-to-turnover ratio (%)';
-descriptions.P75FlipToTurnoverRatio = '75th percentile of flip-to-turnover ratio (%)';
-descriptions.P90FlipToTurnoverRatio = '90th percentile of flip-to-turnover ratio (%)';
-descriptions.MinFlipToTurnoverRatio = 'Minimum flip-to-turnover ratio (%)';
-descriptions.MaxFlipToTurnoverRatio = 'Maximum flip-to-turnover ratio (%)';
+descriptions.AvgFlipToTurnoverRatio = 'Legacy alias: average lab flips per lab turnover (%)';
+descriptions.MedianFlipToTurnoverRatio = 'Legacy alias: median lab flips per lab turnover (%)';
+descriptions.StdFlipToTurnoverRatio = 'Legacy alias: standard deviation of lab flips per lab turnover (%)';
+descriptions.P25FlipToTurnoverRatio = 'Legacy alias: 25th percentile of lab flips per lab turnover (%)';
+descriptions.P75FlipToTurnoverRatio = 'Legacy alias: 75th percentile of lab flips per lab turnover (%)';
+descriptions.P90FlipToTurnoverRatio = 'Legacy alias: 90th percentile of lab flips per lab turnover (%)';
+descriptions.MinFlipToTurnoverRatio = 'Legacy alias: minimum lab flips per lab turnover (%)';
+descriptions.MaxFlipToTurnoverRatio = 'Legacy alias: maximum lab flips per lab turnover (%)';
 descriptions.AvgCasesPerHour = 'Average cases processed per hour';
 descriptions.UtilizationRate = 'Overall utilization rate (0-1)';
 
@@ -655,8 +659,10 @@ descriptions.MaxIdleTimePerTurnover = 'Maximum idle time per turnover (minutes)'
 descriptions.AvgOperatorIdlePerOperatorTurnover = 'Average operator idle time per same-operator case transition (minutes)';
 descriptions.MedianOperatorIdlePerOperatorTurnover = 'Median operator idle time per same-operator case transition (minutes)';
 descriptions.StdOperatorIdlePerOperatorTurnover = 'Standard deviation of operator idle time per same-operator case transition (minutes)';
-descriptions.AvgLabFlipPerOperatorTurnoverRatio = 'Average lab flip ratio per same-operator case transition (%)';
-descriptions.MedianLabFlipPerOperatorTurnoverRatio = 'Median lab flip ratio per same-operator case transition (%)';
+descriptions.AvgLabFlipPerLabTurnoverRatio = 'Average lab flips per lab turnover (%)';
+descriptions.MedianLabFlipPerLabTurnoverRatio = 'Median lab flips per lab turnover (%)';
+descriptions.AvgLabFlipPerOperatorTurnoverRatio = 'Average lab flips per same-operator turnover (%)';
+descriptions.MedianLabFlipPerOperatorTurnoverRatio = 'Median lab flips per same-operator turnover (%)';
 
 % Multi-procedure day metrics
 descriptions.MultiProcedureDays = 'Number of days with multiple procedures';

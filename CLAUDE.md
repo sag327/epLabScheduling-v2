@@ -98,6 +98,7 @@ summary = analysisResults.scheduleAnalysis.dailyEfficiency.summary;
 
 fprintf('Operator idle/operator turnover: %.1f min\n', summary.aggregateOperatorIdlePerOperatorTurnover);
 fprintf('Lab flips/operator turnover: %.2f\n', summary.aggregateLabFlipPerOperatorTurnover);
+fprintf('Lab flips/lab turnover: %.2f\n', summary.aggregateLabFlipPerLabTurnover);
 ```
 
 ### Experiment Framework Usage

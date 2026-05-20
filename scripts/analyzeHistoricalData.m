@@ -935,12 +935,14 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             dailySummary.meanOperatorIdlePerOperatorTurnover, dailySummary.stdOperatorIdlePerOperatorTurnover);
         fprintf('  Operator idle/lab turnover (legacy mean daily): %.2f±%.2f min/turnover\n', ...
             dailySummary.meanOperatorIdlePerLabTurnover, dailySummary.stdOperatorIdlePerLabTurnover);
-        fprintf('  Lab flips/operator turnover (weighted aggregate): %.2f\n', dailySummary.aggregateLabFlipPerOperatorTurnover);
-        fprintf('  Lab flips/lab turnover (legacy mean daily): %.2f±%.2f\n', ...
+        fprintf('  Lab flips/operator turnover (primary weighted aggregate): %.2f\n', dailySummary.aggregateLabFlipPerOperatorTurnover);
+        fprintf('  Lab flips/operator turnover (primary mean daily): %.2f±%.2f\n', ...
+            dailySummary.meanLabFlipPerOperatorTurnover, dailySummary.stdLabFlipPerOperatorTurnover);
+        fprintf('  Lab flips/lab turnover (secondary mean daily): %.2f±%.2f\n', ...
             dailySummary.meanLabFlipPerLabTurnover, dailySummary.stdLabFlipPerLabTurnover);
         fprintf('  Avg concurrent labs (setup+proc+post): mean %.2f, std %.2f\n', dailySummary.meanAvgConcurrentLabs, dailySummary.stdAvgConcurrentLabs);
         ci = dailySummary.corrIdle_vs_FlipTurnover;
-        fprintf('  Corr Idle vs Flip/Turnover: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', ci.pearson_r, ci.pearson_p, ci.spearman_r, ci.spearman_p);
+        fprintf('  Corr Idle/Lab Turnover vs Lab Flips/Lab Turnover: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', ci.pearson_r, ci.pearson_p, ci.spearman_r, ci.spearman_p);
         cj = dailySummary.corrIdle_vs_AvgConcurrentLabs;
         fprintf('  Corr Idle vs Avg Concurrent Labs: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', cj.pearson_r, cj.pearson_p, cj.spearman_r, cj.spearman_p);
     end
