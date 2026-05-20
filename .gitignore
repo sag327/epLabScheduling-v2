@@ -1,0 +1,4 @@
+.DS_Store
+
+# Generated experiment outputs
+scripts/experiments/results/
