@@ -16,8 +16,9 @@ function plotAnalysisResults(analysisResults, varargin)
 %       'mean', 'median', 'std', 'min', 'max', 'p25', 'p75', 'p90'
 %
 % - Time series plot (enable with 'CreateTimeSeriesPlot', true):
-%   - Operator flip ratio over time by operator, plus average operator flip ratio trend
-%   - Separate department time series for lab flips per lab turnover
+%   - Figure 1: average operator flip ratio and department flip ratio over time
+%   - Figure 2: median operator idle time per turnover over time
+%   - Optional operator-trace figure when 'ShowIndividualOperatorTraces' is true
 %
 % - Box plots (enable with 'CreateBoxPlots', true):
 %   - Distribution of operator lab-flips-per-operator-turnover ratios (%)
@@ -34,6 +35,9 @@ function plotAnalysisResults(analysisResults, varargin)
 % Optional Parameters:
 %   'CreateCorrelationPlot' - logical, create correlation plot (default: false)
 %   'CreateTimeSeriesPlot'  - logical, create time series plot (default: false)
+%   'ShowIndividualOperatorTraces' - logical, show the optional individual
+%                                    operator trace figure when plotting
+%                                    time series data (default: false)
 %   'CreateBoxPlots'        - logical, create box and whisker plots (default: false)
 %   'CreateDailyDeptScatter' - logical, plot daily dept idle/turnover vs flip/turnover and avg concurrent labs (default: false)
 %   'SelectedProcedure'     - string, procedure for correlation (default: auto-select)
@@ -43,12 +47,14 @@ function plotAnalysisResults(analysisResults, varargin)
 %   plotAnalysisResults(analysisResults)  % Basic plots only
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true, 'CreateTimeSeriesPlot', true)
+%   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'ShowIndividualOperatorTraces', true)
 %   plotAnalysisResults(analysisResults, 'CreateBoxPlots', true)
 
 % Parse optional parameters
 p = inputParser();
 addParameter(p, 'CreateCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
+addParameter(p, 'ShowIndividualOperatorTraces', false, @islogical);
 addParameter(p, 'CreateBoxPlots', false, @islogical);
 addParameter(p, 'CreateDailyDeptScatter', false, @islogical);
 addParameter(p, 'SelectedProcedure', '', @ischar);
@@ -57,6 +63,7 @@ parse(p, varargin{:});
 
 doCreateCorrelationPlot = p.Results.CreateCorrelationPlot;
 doCreateTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
+doShowIndividualOperatorTraces = p.Results.ShowIndividualOperatorTraces;
 doCreateBoxPlots = p.Results.CreateBoxPlots;
 doCreateDailyDeptScatter = p.Results.CreateDailyDeptScatter;
 selectedProcedure = p.Results.SelectedProcedure;
@@ -209,7 +216,7 @@ end
 
 % Create time series plot if requested
 if doCreateTimeSeriesPlot
-    createTimeSeriesPlot(analysisResults);
+    createTimeSeriesPlot(analysisResults, doShowIndividualOperatorTraces);
 end
 
 % Create box plots if requested
@@ -404,7 +411,7 @@ if length(correlationValues) > 2
     p = polyfit(correlationValues, correlationFlipRatios, 1);
     xTrend = linspace(min(correlationValues), max(correlationValues), 100);
     yTrend = polyval(p, xTrend);
-    plot(xTrend, yTrend, 'r--', 'LineWidth', 2);
+    plot(xTrend, yTrend, 'r-', 'LineWidth', 2);
     
     % Create title with correlation
     titleStr = sprintf('%s %s vs Lab Flips per Operator Turnover (r = %.3f)', selectedProcedure, upper(selectedMetric), rValue);
@@ -479,7 +486,7 @@ if ~isempty(newProcedure) && ~isempty(newMetric)
             p = polyfit(newCorrelationValues, newCorrelationFlipRatios, 1);
             xTrend = linspace(min(newCorrelationValues), max(newCorrelationValues), 100);
             yTrend = polyval(p, xTrend);
-            plot(xTrend, yTrend, 'r--', 'LineWidth', 2);
+            plot(xTrend, yTrend, 'r-', 'LineWidth', 2);
             
             % Create title with correlation
             titleStr = sprintf('%s %s vs Lab Flips per Operator Turnover (r = %.3f)', newProcedure, upper(newMetric), rValue);
@@ -522,13 +529,18 @@ else
 end
 end
 
-function createTimeSeriesPlot(analysisResults)
-% Create time series plots for:
-% 1) operator lab-flips per operator turnover over time
-% 2) department lab-flips per lab turnover over time
+function createTimeSeriesPlot(analysisResults, showIndividualOperatorTraces)
+% Create retrospective time series figures:
+% 1) average operator flip ratio and department flip ratio
+% 2) median operator idle time per turnover
 %
 % Input:
 %   analysisResults - structure returned by analyzeHistoricalData
+%   showIndividualOperatorTraces - logical, show optional operator-trace figure
+
+if nargin < 2
+    showIndividualOperatorTraces = false;
+end
 
 if ~isfield(analysisResults, 'operatorAnalysis') || ...
    ~isfield(analysisResults.operatorAnalysis, 'caseStats') || ...
@@ -538,7 +550,6 @@ if ~isfield(analysisResults, 'operatorAnalysis') || ...
     return;
 end
 
-% Get time series data
 caseStats = analysisResults.operatorAnalysis.caseStats;
 idleTimeStats = analysisResults.operatorAnalysis.idleTimeStats;
 analyzedDates = analysisResults.operatorAnalysis.analyzedDates;
@@ -548,20 +559,12 @@ if isempty(analyzedDates)
     return;
 end
 
-% Convert date strings to datetime objects for proper plotting
-try
-    dateObjects = datetime(analyzedDates, 'InputFormat', 'dd-MMM-yyyy');
-catch
-    % Try alternative format
-    try
-        dateObjects = datetime(analyzedDates);
-    catch
-        msgbox('Unable to parse dates for time series plot.', 'Error', 'error');
-        return;
-    end
+dateObjects = convertDateStringsToDatetime(analyzedDates);
+if isempty(dateObjects)
+    msgbox('Unable to parse dates for time series plot.', 'Error', 'error');
+    return;
 end
 
-% Get all operators
 operatorNames = keys(caseStats);
 numOperators = length(operatorNames);
 numDates = length(analyzedDates);
@@ -571,116 +574,45 @@ if numOperators == 0 || numDates == 0
     return;
 end
 
-% Create operator-focused figure
-figure('Position', [400, 400, 1400, 800]);
-
-% Calculate flip-to-turnover ratios for each operator on each day
-flipRatioMatrix = NaN(numOperators, numDates);  % operators x dates
+flipRatioMatrix = NaN(numOperators, numDates);
 operatorLabels = cell(numOperators, 1);
-
 for opIdx = 1:numOperators
     opName = operatorNames{opIdx};
     operatorLabels{opIdx} = opName;
-    
+
     caseArray = caseStats(opName);
-    
-    % Get flip stats if available
-    if isfield(analysisResults.operatorAnalysis, 'idleTimeStats') && ...
-       isfield(analysisResults, 'labFlipAnalysis') && ...
+    if isfield(analysisResults, 'labFlipAnalysis') && ...
        isfield(analysisResults.labFlipAnalysis, 'operatorFlipStats') && ...
        isKey(analysisResults.labFlipAnalysis.operatorFlipStats, opName)
-        
         flipArray = analysisResults.labFlipAnalysis.operatorFlipStats(opName);
-        
         for dateIdx = 1:numDates
             casesThisDay = caseArray(dateIdx);
             flipsThisDay = flipArray(dateIdx);
-            
-            % Only calculate ratio for multi-procedure days (>1 case)
             if ~isnan(casesThisDay) && casesThisDay > 1 && ~isnan(flipsThisDay)
                 turnovers = casesThisDay - 1;
                 if turnovers > 0
-                    flipRatioMatrix(opIdx, dateIdx) = (flipsThisDay / turnovers) * 100; % Convert to percentage
+                    flipRatioMatrix(opIdx, dateIdx) = (flipsThisDay / turnovers) * 100;
                 end
             end
         end
     end
 end
 
-% Plot options
-subplot(2, 1, 1);
-% Plot individual operator lines (lighter colors)
-colors = lines(numOperators);
-hold on;
-
-validOperatorCount = 0;
-for opIdx = 1:numOperators
-    validData = ~isnan(flipRatioMatrix(opIdx, :));
-    if any(validData)
-        validOperatorCount = validOperatorCount + 1;
-        plot(dateObjects, flipRatioMatrix(opIdx, :), 'o-', 'Color', colors(opIdx, :), ...
-             'LineWidth', 1, 'MarkerSize', 4, 'DisplayName', operatorLabels{opIdx});
-    end
-end
-
-% This is the unweighted average of valid operator daily ratios, not a
-% department-wide total-flips / total-turnovers calculation.
 avgOperatorFlipRatio = nanmean(flipRatioMatrix, 1);
+[deptFlipPerOperatorTurnover, deptDateObjects] = buildDepartmentFlipSeries(analysisResults, analyzedDates);
+[dailyMedianIdlePerTurnover, dailyWeightedIdlePerTurnover] = buildOperatorIdleSeries(analysisResults, analyzedDates);
+
+if showIndividualOperatorTraces
+    createIndividualOperatorTracesFigure(dateObjects, flipRatioMatrix, operatorLabels);
+end
+
+createFlipRatioSummaryFigure(dateObjects, avgOperatorFlipRatio, deptFlipPerOperatorTurnover);
+createOperatorIdleTimeTrendFigure(deptDateObjects, dailyMedianIdlePerTurnover, dailyWeightedIdlePerTurnover);
+
 validAvgData = ~isnan(avgOperatorFlipRatio);
-if any(validAvgData)
-    plot(dateObjects(validAvgData), avgOperatorFlipRatio(validAvgData), 'k-', 'LineWidth', 3, ...
-         'MarkerSize', 8, 'DisplayName', 'Average Operator Flip Ratio');
-end
-
-title('Operator Lab Flips per Operator Turnover Over Time');
-xlabel('Date');
-ylabel('Lab Flips per Operator Turnover (%)');
-grid on;
-legend('Location', 'best', 'FontSize', 8);
-hold off;
-
-% Create second subplot showing just the operator-average trend
-subplot(2, 1, 2);
-if any(validAvgData)
-    plot(dateObjects(validAvgData), avgOperatorFlipRatio(validAvgData), 'ko-', 'LineWidth', 2, 'MarkerSize', 6);
-    hold on;
-    
-    % Add trend line if we have enough points
-    if sum(validAvgData) > 2
-        validDates = dateObjects(validAvgData);
-        validValues = avgOperatorFlipRatio(validAvgData);
-        
-        % Convert dates to numbers for polyfit
-        dateNums = datenum(validDates);
-        p = polyfit(dateNums, validValues, 1);
-        trendLine = polyval(p, dateNums);
-        plot(validDates, trendLine, 'r--', 'LineWidth', 2, 'DisplayName', 'Trend');
-        
-        % Display trend info
-        if p(1) > 0
-            trendDirection = 'increasing';
-        elseif p(1) < 0
-            trendDirection = 'decreasing';
-        else
-            trendDirection = 'stable';
-        end
-        
-        fprintf('Average operator flip-ratio trend: %s (slope = %.3f%% per day)\n', trendDirection, p(1));
-    end
-    
-    hold off;
-end
-
-title('Average Operator Flip Ratio Trend');
-xlabel('Date');
-ylabel('Average Operator Flip Ratio (%)');
-grid on;
-
-% Add summary statistics
+validOperatorCount = sum(any(~isnan(flipRatioMatrix), 2));
 if validOperatorCount > 0
     fprintf('Operator time series plot created with %d operators across %d dates\n', validOperatorCount, sum(validAvgData));
-    
-    % Calculate and display summary statistics
     allValidRatios = flipRatioMatrix(~isnan(flipRatioMatrix));
     if ~isempty(allValidRatios)
         fprintf('Summary statistics across valid operator-day flip ratios:\n');
@@ -692,13 +624,32 @@ if validOperatorCount > 0
 else
     fprintf('No valid operator time series data found for lab-flips-per-operator-turnover ratios\n');
 end
-
-createDepartmentFlipTimeSeriesPlot(analysisResults);
 end
 
-function createDepartmentFlipTimeSeriesPlot(analysisResults)
-% Plot department lab flips per lab turnover over time using the daily
-% department metric calculated in analyzeHistoricalData.
+function dateObjects = convertDateStringsToDatetime(dateStrings)
+dateObjects = NaT(length(dateStrings), 1);
+for i = 1:length(dateStrings)
+    dateStr = dateStrings{i};
+    try
+        dateObjects(i) = datetime(dateStr, 'InputFormat', 'dd-MMM-yyyy');
+    catch
+        try
+            dateObjects(i) = datetime(dateStr);
+        catch
+            dateObjects = [];
+            return;
+        end
+    end
+end
+end
+
+function [deptFlipPerOperatorTurnover, dateObjects] = buildDepartmentFlipSeries(analysisResults, analyzedDates)
+dateObjects = convertDateStringsToDatetime(analyzedDates);
+deptFlipPerOperatorTurnover = NaN(length(analyzedDates), 1);
+
+if isempty(dateObjects)
+    return;
+end
 
 if ~isfield(analysisResults, 'scheduleAnalysis') || ...
    ~isfield(analysisResults.scheduleAnalysis, 'dailyEfficiency') || ...
@@ -709,68 +660,264 @@ if ~isfield(analysisResults, 'scheduleAnalysis') || ...
 end
 
 dailyEff = analysisResults.scheduleAnalysis.dailyEfficiency.byDate;
-dateKeys = keys(dailyEff);
-numDays = length(dateKeys);
+for i = 1:length(analyzedDates)
+    dateStr = analyzedDates{i};
+    if isKey(dailyEff, dateStr)
+        d = dailyEff(dateStr);
+        if isfield(d, 'overallDeptLabFlipPerOperatorTurnoverDaily')
+            deptFlipPerOperatorTurnover(i) = d.overallDeptLabFlipPerOperatorTurnoverDaily * 100;
+        elseif isfield(d, 'overallDeptFlipToTurnoverRatioDaily')
+            deptFlipPerOperatorTurnover(i) = d.overallDeptFlipToTurnoverRatioDaily * 100;
+        end
+    end
+end
+end
 
-if numDays == 0
-    warning('No department daily efficiency entries found for department flip-ratio plot.');
+function [dailyMedianIdlePerTurnover, dailyWeightedIdlePerTurnover] = buildOperatorIdleSeries(analysisResults, analyzedDates)
+numDates = length(analyzedDates);
+dailyMedianIdlePerTurnover = NaN(numDates, 1);
+dailyWeightedIdlePerTurnover = NaN(numDates, 1);
+
+if ~isfield(analysisResults, 'operatorAnalysis') || ...
+   ~isfield(analysisResults.operatorAnalysis, 'caseStats') || ...
+   ~isfield(analysisResults.operatorAnalysis, 'idleTimeStats')
+    warning('Operator daily idle statistics not available for idle-time trend plot.');
     return;
 end
 
-dateObjects = NaT(numDays, 1);
-deptFlipPerLabTurnover = NaN(numDays, 1);
+caseStats = analysisResults.operatorAnalysis.caseStats;
+idleTimeStats = analysisResults.operatorAnalysis.idleTimeStats;
+operatorNames = keys(caseStats);
 
-for i = 1:numDays
-    dateKey = dateKeys{i};
-    try
-        dateObjects(i) = datetime(dateKey, 'InputFormat', 'dd-MMM-yyyy');
-    catch
-        dateObjects(i) = datetime(dateKey);
+for dateIdx = 1:numDates
+    dailyIdlePerTurnover = [];
+    for opIdx = 1:length(operatorNames)
+        opName = operatorNames{opIdx};
+        caseArray = caseStats(opName);
+        idleArray = idleTimeStats(opName);
+        if dateIdx <= length(caseArray) && dateIdx <= length(idleArray)
+            casesThisDay = caseArray(dateIdx);
+            idleThisDay = idleArray(dateIdx);
+            if ~isnan(casesThisDay) && casesThisDay > 1 && ~isnan(idleThisDay)
+                turnovers = casesThisDay - 1;
+                if turnovers > 0
+                    dailyIdlePerTurnover(end+1) = idleThisDay / turnovers; %#ok<AGROW>
+                end
+            end
+        end
     end
 
-    d = dailyEff(dateKey);
-    if isfield(d, 'overallDeptFlipToTurnoverRatioDaily')
-        deptFlipPerLabTurnover(i) = d.overallDeptFlipToTurnoverRatioDaily * 100;
+    if ~isempty(dailyIdlePerTurnover)
+        dailyMedianIdlePerTurnover(dateIdx) = median(dailyIdlePerTurnover);
     end
 end
 
-[dateObjects, sortIdx] = sort(dateObjects);
-deptFlipPerLabTurnover = deptFlipPerLabTurnover(sortIdx);
-validData = ~isnan(deptFlipPerLabTurnover);
+if isfield(analysisResults, 'scheduleAnalysis') && ...
+   isfield(analysisResults.scheduleAnalysis, 'dailyEfficiency') && ...
+   isfield(analysisResults.scheduleAnalysis.dailyEfficiency, 'byDate') && ...
+   ~isempty(analysisResults.scheduleAnalysis.dailyEfficiency.byDate)
+    dailyEff = analysisResults.scheduleAnalysis.dailyEfficiency.byDate;
+    for i = 1:numDates
+        dateStr = analyzedDates{i};
+        if isKey(dailyEff, dateStr)
+            d = dailyEff(dateStr);
+            if isfield(d, 'overallDeptOperatorIdlePerOperatorTurnoverDaily')
+                dailyWeightedIdlePerTurnover(i) = d.overallDeptOperatorIdlePerOperatorTurnoverDaily;
+            elseif isfield(d, 'overallDeptIdleToTurnoverRatioDaily')
+                dailyWeightedIdlePerTurnover(i) = d.overallDeptIdleToTurnoverRatioDaily;
+            end
+        end
+    end
+end
+end
 
-figure('Position', [450, 450, 1400, 500]);
-if any(validData)
-    plot(dateObjects(validData), deptFlipPerLabTurnover(validData), 'ko-', 'LineWidth', 2, 'MarkerSize', 6);
-    hold on;
+function createIndividualOperatorTracesFigure(dateObjects, flipRatioMatrix, operatorLabels)
+avgLineColor = [0.00 0.45 0.74];
+trendLineColor = [0.85 0.33 0.10];
+traceColor = [0.70 0.70 0.70];
 
-    if sum(validData) > 2
-        validDates = dateObjects(validData);
-        validValues = deptFlipPerLabTurnover(validData);
+fig = figure('Position', [350, 350, 1500, 700], 'Color', 'w', 'InvertHardcopy', 'off');
+ax = axes('Parent', fig);
+applyReadableTimeSeriesAxesStyle(ax);
+hold(ax, 'on');
+
+numOperators = size(flipRatioMatrix, 1);
+for opIdx = 1:numOperators
+    validData = ~isnan(flipRatioMatrix(opIdx, :));
+    if any(validData)
+        plot(ax, dateObjects, flipRatioMatrix(opIdx, :), '-', ...
+            'Color', traceColor, 'LineWidth', 0.8, 'HandleVisibility', 'off');
+        plot(ax, dateObjects(validData), flipRatioMatrix(opIdx, validData), 'o', ...
+            'Color', traceColor, 'MarkerSize', 3, 'HandleVisibility', 'off');
+    end
+end
+
+avgOperatorFlipRatio = nanmean(flipRatioMatrix, 1);
+validAvgData = ~isnan(avgOperatorFlipRatio);
+if any(validAvgData)
+    plot(ax, dateObjects(validAvgData), avgOperatorFlipRatio(validAvgData), 'o-', ...
+        'Color', avgLineColor, 'LineWidth', 2.5, 'MarkerSize', 5, ...
+        'MarkerFaceColor', avgLineColor, 'DisplayName', 'Average Operator Flip Ratio');
+    if sum(validAvgData) > 2
+        validDates = dateObjects(validAvgData);
+        validValues = avgOperatorFlipRatio(validAvgData);
         dateNums = datenum(validDates);
         p = polyfit(dateNums, validValues, 1);
         trendLine = polyval(p, dateNums);
-        plot(validDates, trendLine, 'r--', 'LineWidth', 2, 'DisplayName', 'Trend');
-
-        if p(1) > 0
-            trendDirection = 'increasing';
-        elseif p(1) < 0
-            trendDirection = 'decreasing';
-        else
-            trendDirection = 'stable';
-        end
-
-        fprintf('Department lab-flips-per-lab-turnover trend: %s (slope = %.3f%% per day)\n', trendDirection, p(1));
+        plot(ax, validDates, trendLine, '-', 'Color', trendLineColor, ...
+            'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
     end
-
-    hold off;
-else
-    fprintf('No valid department daily lab-flips-per-lab-turnover values found.\n');
 end
 
-title('Department Lab Flips per Lab Turnover Over Time');
-xlabel('Date');
-ylabel('Lab Flips per Lab Turnover (%)');
-grid on;
+title(ax, 'Individual Operator Lab Flips per Operator Turnover Over Time');
+xlabel(ax, 'Date');
+ylabel(ax, 'Lab Flips per Operator Turnover (%)');
+ylim(ax, [0 100]);
+xlim(ax, [min(dateObjects) max(dateObjects)]);
+set(get(ax, 'Title'), 'Color', [0.10 0.10 0.10]);
+set(get(ax, 'XLabel'), 'Color', [0.10 0.10 0.10]);
+set(get(ax, 'YLabel'), 'Color', [0.10 0.10 0.10]);
+leg = legend(ax, 'Location', 'northwest', 'FontSize', 9, 'Box', 'off');
+set(leg, 'TextColor', [0.10 0.10 0.10], 'Color', 'w');
+text(ax, 0.995, 0.03, 'Gray lines = individual operators', ...
+    'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+    'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
+hold(ax, 'off');
+end
+
+function createFlipRatioSummaryFigure(dateObjects, avgOperatorFlipRatio, deptFlipPerOperatorTurnover)
+avgLineColor = [0.00 0.45 0.74];
+deptLineColor = [0.10 0.55 0.35];
+trendLineColor = [0.85 0.33 0.10];
+
+fig = figure('Position', [400, 400, 1400, 850], 'Color', 'w', 'InvertHardcopy', 'off');
+
+ax1 = subplot(2, 1, 1, 'Parent', fig);
+applyReadableTimeSeriesAxesStyle(ax1);
+hold(ax1, 'on');
+validAvgData = ~isnan(avgOperatorFlipRatio);
+if any(validAvgData)
+    plot(ax1, dateObjects(validAvgData), avgOperatorFlipRatio(validAvgData), 'o-', ...
+         'Color', avgLineColor, 'LineWidth', 0.5, 'MarkerSize', 2.5, ...
+         'MarkerFaceColor', avgLineColor, 'DisplayName', 'Average Operator Flip Ratio');
+    if sum(validAvgData) > 2
+        validDates = dateObjects(validAvgData);
+        validValues = avgOperatorFlipRatio(validAvgData);
+        dateNums = datenum(validDates);
+        p = polyfit(dateNums, validValues, 1);
+        trendLine = polyval(p, dateNums);
+        plot(ax1, validDates, trendLine, '-', 'Color', trendLineColor, ...
+            'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
+    end
+end
+title(ax1, 'Average Operator Lab Flips per Operator Turnover Over Time');
+xlabel(ax1, 'Date');
+ylabel(ax1, 'Lab Flips per Operator Turnover (%)');
+ylim(ax1, [0 100]);
+xlim(ax1, [min(dateObjects) max(dateObjects)]);
+set(get(ax1, 'Title'), 'Color', [0.10 0.10 0.10]);
+set(get(ax1, 'XLabel'), 'Color', [0.10 0.10 0.10]);
+set(get(ax1, 'YLabel'), 'Color', [0.10 0.10 0.10]);
+leg1 = legend(ax1, 'Location', 'northwest', 'FontSize', 9, 'Box', 'off');
+set(leg1, 'TextColor', [0.10 0.10 0.10], 'Color', 'w');
+grid off;
+hold(ax1, 'off');
+
+ax2 = subplot(2, 1, 2, 'Parent', fig);
+applyReadableTimeSeriesAxesStyle(ax2);
+hold(ax2, 'on');
+validDeptData = ~isnan(deptFlipPerOperatorTurnover);
+if any(validDeptData)
+    plot(ax2, dateObjects(validDeptData), deptFlipPerOperatorTurnover(validDeptData), 'o-', ...
+         'Color', deptLineColor, 'LineWidth', 0.5, 'MarkerSize', 2, ...
+         'MarkerFaceColor', deptLineColor, 'DisplayName', 'Department Daily Ratio');
+    if sum(validDeptData) > 2
+        validDates = dateObjects(validDeptData);
+        validValues = deptFlipPerOperatorTurnover(validDeptData);
+        dateNums = datenum(validDates);
+        p = polyfit(dateNums, validValues, 1);
+        trendLine = polyval(p, dateNums);
+        plot(ax2, validDates, trendLine, '-', 'Color', trendLineColor, ...
+            'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
+    end
+end
+title(ax2, 'Department Lab Flips per Operator Turnover Over Time');
+xlabel(ax2, 'Date');
+ylabel(ax2, 'Lab Flips per Operator Turnover (%)');
+ylim(ax2, [0 100]);
+xlim(ax2, [min(dateObjects) max(dateObjects)]);
+set(get(ax2, 'Title'), 'Color', [0.10 0.10 0.10]);
+set(get(ax2, 'XLabel'), 'Color', [0.10 0.10 0.10]);
+set(get(ax2, 'YLabel'), 'Color', [0.10 0.10 0.10]);
+leg2 = legend(ax2, 'Location', 'northwest', 'FontSize', 9, 'Box', 'off');
+set(leg2, 'TextColor', [0.10 0.10 0.10], 'Color', 'w');
+grid off;
+hold(ax2, 'off');
+end
+
+function createOperatorIdleTimeTrendFigure(dateObjects, dailyMedianIdlePerTurnover, dailyWeightedIdlePerTurnover)
+medianColor = [0.00 0.45 0.74];
+trendLineColor = [0.85 0.33 0.10];
+
+fig = figure('Position', [450, 450, 1400, 650], 'Color', 'w', 'InvertHardcopy', 'off');
+ax = axes('Parent', fig);
+applyReadableTimeSeriesAxesStyle(ax);
+hold(ax, 'on');
+
+validMedian = ~isnan(dailyMedianIdlePerTurnover);
+if any(validMedian)
+    plot(ax, dateObjects(validMedian), dailyMedianIdlePerTurnover(validMedian), 'o-', ...
+        'Color', medianColor, 'LineWidth', 0.5, 'MarkerSize', 2.5, ...
+        'MarkerFaceColor', medianColor, 'DisplayName', 'Median Operator Idle/Turnover');
+    if sum(validMedian) > 2
+        validDates = dateObjects(validMedian);
+        validValues = dailyMedianIdlePerTurnover(validMedian);
+        dateNums = datenum(validDates);
+        p = polyfit(dateNums, validValues, 1);
+        trendLine = polyval(p, dateNums);
+        plot(ax, validDates, trendLine, '-', 'Color', trendLineColor, ...
+            'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
+    end
+end
+
+title(ax, 'Operator Idle Time per Turnover Over Time');
+xlabel(ax, 'Date');
+ylabel(ax, 'Idle Time per Turnover (minutes)');
+xlim(ax, [min(dateObjects) max(dateObjects)]);
+set(get(ax, 'Title'), 'Color', [0.10 0.10 0.10]);
+set(get(ax, 'XLabel'), 'Color', [0.10 0.10 0.10]);
+set(get(ax, 'YLabel'), 'Color', [0.10 0.10 0.10]);
+leg = legend(ax, 'Location', 'northwest', 'FontSize', 9, 'Box', 'off');
+set(leg, 'TextColor', [0.10 0.10 0.10], 'Color', 'w');
+%text(ax, 0.995, 0.03, 'Median = typical operator-day; dashed line = linear trend', ...
+%    'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+%    'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
+grid off;
+hold(ax, 'off');
+end
+
+function applyReadableTimeSeriesAxesStyle(ax)
+% Apply a consistent high-contrast style for dense time-series plots.
+if isgraphics(ax.Parent, 'figure')
+    set(ax.Parent, 'Color', 'w', 'InvertHardcopy', 'off');
+end
+set(ax, 'Box', 'off', ...
+    'Color', 'w', ...
+    'FontSize', 11, ...
+    'LineWidth', 1.0, ...
+    'XColor', [0.20 0.20 0.20], ...
+    'YColor', [0.20 0.20 0.20], ...
+    'GridColor', [0.85 0.85 0.85], ...
+    'GridAlpha', 1.0, ...
+    'MinorGridColor', [0.93 0.93 0.93], ...
+    'MinorGridAlpha', 1.0);
+grid(ax, 'on');
+grid(ax, 'minor');
+ax.Layer = 'top';
+try
+    xtickformat(ax, 'MMM yyyy');
+catch
+end
 end
 
 function createBoxPlotsForMetrics(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators)
