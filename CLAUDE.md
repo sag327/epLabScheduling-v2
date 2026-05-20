@@ -101,6 +101,33 @@ fprintf('Lab flips/operator turnover: %.2f\n', summary.aggregateLabFlipPerOperat
 fprintf('Lab flips/lab turnover: %.2f\n', summary.aggregateLabFlipPerLabTurnover);
 ```
 
+### Retrospective Visualization
+```matlab
+% Default retrospective summary: one figure with two operator bar-chart subplots
+%   1. Lab flips per operator turnover
+%   2. Median idle time per turnover
+plotAnalysisResults(analysisResults);
+
+% Time-series mode is exclusive: only time-series figures are displayed
+plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true);
+
+% Limit time-series plots to the latest 6 retrospective months
+plotAnalysisResults(analysisResults, ...
+    'CreateTimeSeriesPlot', true, ...
+    'RetrospectiveMonths', 6);
+
+% Show individual operator-day markers on the time-series views
+% Sparse operator values are marker-only so missing days do not create line fragments
+plotAnalysisResults(analysisResults, ...
+    'CreateTimeSeriesPlot', true, ...
+    'ShowIndividualOperatorTraces', true, ...
+    'RetrospectiveMonths', 6);
+```
+
+Time-series outputs:
+- Flip-ratio figure with average operator lab flips/operator turnover and department lab flips/operator turnover
+- Idle-time figure with median operator idle time/operator turnover and a linear trend line
+
 ### Experiment Framework Usage
 ```matlab
 % Add scripts path

@@ -24,9 +24,32 @@ Supporting scripts for batch operations and data handling:
 ## Visualization & Plotting (3 files)
 Scripts for creating charts and visualizations:
 
-- `plotAnalysisResults.m` - General analysis plotting
+- `plotAnalysisResults.m` - Retrospective operator and department plotting
 - `plot_operator_metrics_example.m` - Operator metrics visualization example
 - `quickFlipsChart.m` - Quick chart generation for flip metrics
+
+### Retrospective plotting examples
+
+```matlab
+% Default summary: one figure with two operator bar-chart subplots
+plotAnalysisResults(analysisResults);
+
+% Time-series mode only displays time-series figures
+plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true);
+
+% Restrict time-series plots to the latest 6 retrospective months
+plotAnalysisResults(analysisResults, ...
+    'CreateTimeSeriesPlot', true, ...
+    'RetrospectiveMonths', 6);
+
+% Add individual operator-day markers without connecting sparse NaN gaps
+plotAnalysisResults(analysisResults, ...
+    'CreateTimeSeriesPlot', true, ...
+    'ShowIndividualOperatorTraces', true, ...
+    'RetrospectiveMonths', 6);
+```
+
+Time-series mode creates a flip-ratio figure and an idle-time figure. Individual operator traces are marker-only to avoid misleading line fragments across missing days.
 
 ## Total: 14 MATLAB Scripts
 All production scripts are now organized in this single location for better project structure.
