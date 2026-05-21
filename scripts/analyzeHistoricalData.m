@@ -18,6 +18,10 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %   'ShowStats'          - logical, display detailed statistics (default: true)
 %   'SaveReport'         - logical, save analysis to text file (default: false)  
 %   'ReportFile'         - char/string, output file name (default: 'historical_analysis_report.txt')
+%   'DateRange'          - two-element date range, analyze only cases in
+%                          the inclusive date range (default: [], full history)
+%   'WeekdaysOnly'       - logical, include only Monday-Friday cases
+%                          (default: false)
 %
 % Examples:
 %   % Basic analysis (data only)
@@ -32,6 +36,15 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, ...
 %                        'ShowStats', false, 'SaveReport', true, ...
 %                        'ReportFile', 'ep_lab_analysis.txt');
+%
+%   % Analyze a specific inclusive date range
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, ...
+%                        'DateRange', [datetime(2025,10,1), datetime(2026,3,31)]);
+%
+%   % Analyze weekdays only within a specific inclusive date range
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, ...
+%                        'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
+%                        'WeekdaysOnly', true);
 %
 % Output:
 %   analysisResults - Structure containing comprehensive analysis results:
@@ -75,6 +88,8 @@ addParameter(p, 'HistoricalSchedules', [], @(x) isempty(x) || (isa(x, 'container
 addParameter(p, 'ShowStats', true, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'SaveReport', false, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'ReportFile', 'historical_analysis_report.txt', @(x) ischar(x) || isstring(x));
+addParameter(p, 'DateRange', [], @isValidDateRangeInput);
+addParameter(p, 'WeekdaysOnly', false, @(x) islogical(x) && isscalar(x));
 
 % Parse the inputs
 parse(p, historicalData, varargin{:});
@@ -84,6 +99,8 @@ historicalSchedules = p.Results.HistoricalSchedules;
 showStats = p.Results.ShowStats;
 saveReport = p.Results.SaveReport;
 reportFile = char(p.Results.ReportFile);
+dateRange = p.Results.DateRange;
+weekdaysOnly = p.Results.WeekdaysOnly;
 
 fprintf('=== HISTORICAL DATA ANALYSIS ===\n');
 
@@ -97,6 +114,16 @@ end
 
 fprintf('Analyzing historical data structure with %d cases\n', length(historicalData.caseID));
 
+filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly);
+if filterMetadata.filterApplied
+    historicalData = filterHistoricalDataByMask(historicalData, filterMetadata.caseMask);
+    historicalSchedules = filterHistoricalSchedulesByIncludedDates(historicalSchedules, ...
+        filterMetadata.includedDates);
+    fprintf('Analysis filter applied: %s, %d of %d cases retained\n', ...
+        filterMetadata.filterDescription, filterMetadata.nCasesAfterFilter, ...
+        filterMetadata.nCasesBeforeFilter);
+end
+
 % Initialize results structure
 analysisResults = struct();
 
@@ -104,6 +131,13 @@ analysisResults = struct();
 [analysisResults.datasetSummary, analysisResults.procedureAnalysis, ...
  analysisResults.surgeonAnalysis, analysisResults.timeAnalysis, ...
  analysisResults.roomAnalysis] = performDetailedAnalysis(historicalData, showStats);
+analysisResults.datasetSummary.filterApplied = filterMetadata.filterApplied;
+analysisResults.datasetSummary.dateRangeFilterApplied = filterMetadata.dateRangeFilterApplied;
+analysisResults.datasetSummary.weekdaysOnly = filterMetadata.weekdaysOnly;
+analysisResults.datasetSummary.analysisStartDate = filterMetadata.analysisStartDate;
+analysisResults.datasetSummary.analysisEndDate = filterMetadata.analysisEndDate;
+analysisResults.datasetSummary.nCasesBeforeFilter = filterMetadata.nCasesBeforeFilter;
+analysisResults.datasetSummary.nCasesAfterFilter = filterMetadata.nCasesAfterFilter;
 
 % Perform comprehensive operator metrics analysis
 operatorMetrics = performOperatorMetricsAnalysis(historicalData, showStats);
@@ -151,6 +185,147 @@ end
 
 fprintf('\nHistorical data analysis complete!\n');
 
+end
+
+function isValid = isValidDateRangeInput(dateRange)
+isValid = isempty(dateRange) || ...
+    ((isdatetime(dateRange) || isstring(dateRange) || iscellstr(dateRange)) && numel(dateRange) == 2) || ...
+    (ischar(dateRange) && size(dateRange, 1) == 2);
+end
+
+function filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly)
+nCases = length(historicalData.caseID);
+dateObjects = parseHistoricalDateValues(historicalData.date);
+validDates = dateObjects(~isnat(dateObjects));
+dateRangeFilterApplied = ~isempty(dateRange);
+
+filterMetadata = struct();
+filterMetadata.filterApplied = dateRangeFilterApplied || weekdaysOnly;
+filterMetadata.dateRangeFilterApplied = dateRangeFilterApplied;
+filterMetadata.weekdaysOnly = weekdaysOnly;
+filterMetadata.nCasesBeforeFilter = nCases;
+filterMetadata.nCasesAfterFilter = nCases;
+filterMetadata.caseMask = true(nCases, 1);
+filterMetadata.includedDates = unique(validDates);
+filterMetadata.filterDescription = 'no filter';
+
+if isempty(validDates)
+    filterMetadata.analysisStartDate = NaT;
+    filterMetadata.analysisEndDate = NaT;
+    if filterMetadata.filterApplied
+        error('Cannot apply analysis filters because historicalData.date contains no valid dates.');
+    end
+    return;
+end
+
+analysisStartDate = min(validDates);
+analysisEndDate = max(validDates);
+filterDescriptions = {};
+
+if dateRangeFilterApplied
+    parsedDateRange = parseDateRangeInput(dateRange);
+    analysisStartDate = parsedDateRange(1);
+    analysisEndDate = parsedDateRange(2);
+    filterMetadata.caseMask = filterMetadata.caseMask & ...
+        (dateObjects >= analysisStartDate & dateObjects <= analysisEndDate);
+    filterDescriptions{end+1} = sprintf('date range %s to %s', ... %#ok<AGROW>
+        char(string(analysisStartDate)), char(string(analysisEndDate)));
+end
+
+if weekdaysOnly
+    validWeekdayMask = ~isnat(dateObjects) & ismember(weekday(dateObjects), 2:6);
+    filterMetadata.caseMask = filterMetadata.caseMask & validWeekdayMask;
+    filterDescriptions{end+1} = 'weekdays only'; %#ok<AGROW>
+end
+
+if filterMetadata.filterApplied
+    filterMetadata.nCasesAfterFilter = sum(filterMetadata.caseMask);
+    if filterMetadata.nCasesAfterFilter == 0
+        error('Analysis filters retained zero cases.');
+    end
+    includedDates = unique(dateObjects(filterMetadata.caseMask));
+    filterMetadata.includedDates = includedDates(~isnat(includedDates));
+    filterMetadata.analysisStartDate = min(filterMetadata.includedDates);
+    filterMetadata.analysisEndDate = max(filterMetadata.includedDates);
+    filterMetadata.filterDescription = strjoin(filterDescriptions, '; ');
+else
+    filterMetadata.analysisStartDate = analysisStartDate;
+    filterMetadata.analysisEndDate = analysisEndDate;
+end
+end
+
+function dateRange = parseDateRangeInput(dateRangeInput)
+dateRange = parseHistoricalDateValues(dateRangeInput);
+if numel(dateRange) ~= 2 || any(isnat(dateRange))
+    error('DateRange must contain two valid dates.');
+end
+dateRange = sort(dateRange(:))';
+end
+
+function historicalData = filterHistoricalDataByMask(historicalData, caseMask)
+caseMask = caseMask(:);
+nCases = length(caseMask);
+fieldList = fieldnames(historicalData);
+
+for i = 1:length(fieldList)
+    fieldName = fieldList{i};
+    fieldValue = historicalData.(fieldName);
+    if numel(fieldValue) == nCases
+        historicalData.(fieldName) = fieldValue(caseMask);
+    end
+end
+end
+
+function filteredSchedules = filterHistoricalSchedulesByIncludedDates(historicalSchedules, includedDates)
+if isempty(historicalSchedules)
+    filteredSchedules = historicalSchedules;
+    return;
+end
+
+filteredSchedules = containers.Map();
+includedDateKeys = containers.Map();
+for i = 1:length(includedDates)
+    includedDateKeys(upper(datestr(includedDates(i), 'dd-mmm-yyyy'))) = true;
+end
+
+scheduleKeys = keys(historicalSchedules);
+for i = 1:length(scheduleKeys)
+    scheduleKey = scheduleKeys{i};
+    scheduleDate = parseHistoricalDateValues({scheduleKey});
+    if ~isnat(scheduleDate)
+        scheduleDateKey = upper(datestr(scheduleDate, 'dd-mmm-yyyy'));
+    else
+        scheduleDateKey = '';
+    end
+    if isKey(includedDateKeys, scheduleDateKey)
+        filteredSchedules(scheduleKey) = historicalSchedules(scheduleKey);
+    end
+end
+end
+
+function dateObjects = parseHistoricalDateValues(dateValues)
+if isdatetime(dateValues)
+    dateObjects = dateValues(:);
+    return;
+end
+
+dateStrings = string(dateValues);
+dateObjects = NaT(size(dateStrings));
+for i = 1:numel(dateStrings)
+    if ismissing(dateStrings(i)) || strlength(dateStrings(i)) == 0
+        continue;
+    end
+    try
+        dateObjects(i) = datetime(dateStrings(i), 'InputFormat', 'dd-MMM-yyyy');
+    catch
+        try
+            dateObjects(i) = datetime(dateStrings(i));
+        catch
+            dateObjects(i) = NaT;
+        end
+    end
+end
+dateObjects = dateObjects(:);
 end
 
 %% Detailed Analysis Function

@@ -99,6 +99,18 @@ summary = analysisResults.scheduleAnalysis.dailyEfficiency.summary;
 fprintf('Operator idle/operator turnover: %.1f min\n', summary.aggregateOperatorIdlePerOperatorTurnover);
 fprintf('Lab flips/operator turnover: %.2f\n', summary.aggregateLabFlipPerOperatorTurnover);
 fprintf('Lab flips/lab turnover: %.2f\n', summary.aggregateLabFlipPerLabTurnover);
+
+% Optional: analyze only a specific inclusive date range.
+% The filtered analysisResults object controls all downstream plots and summaries.
+analysisResultsWindow = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'DateRange', [datetime(2025,10,1), datetime(2026,3,31)]);
+
+% Optional: analyze weekdays only within a specific inclusive date range.
+analysisResultsWeekdays = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
+    'WeekdaysOnly', true);
 ```
 
 ### Retrospective Visualization
@@ -111,17 +123,14 @@ plotAnalysisResults(analysisResults);
 % Time-series mode is exclusive: only time-series figures are displayed
 plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true);
 
-% Limit time-series plots to the latest 6 retrospective months
-plotAnalysisResults(analysisResults, ...
-    'CreateTimeSeriesPlot', true, ...
-    'RetrospectiveMonths', 6);
+% To restrict plots to a recent time window, first create a filtered analysisResults
+plotAnalysisResults(analysisResultsWindow, 'CreateTimeSeriesPlot', true);
 
 % Show individual operator-day markers on the time-series views
 % Sparse operator values are marker-only so missing days do not create line fragments
 plotAnalysisResults(analysisResults, ...
     'CreateTimeSeriesPlot', true, ...
-    'ShowIndividualOperatorTraces', true, ...
-    'RetrospectiveMonths', 6);
+    'ShowIndividualOperatorTraces', true);
 ```
 
 Time-series outputs:

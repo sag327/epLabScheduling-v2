@@ -31,25 +31,33 @@ Scripts for creating charts and visualizations:
 ### Retrospective plotting examples
 
 ```matlab
+% Optional: restrict all analysis and downstream plots to a date range
+analysisResultsWindow = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'DateRange', [datetime(2025,10,1), datetime(2026,3,31)]);
+
+% Optional: restrict analysis to weekdays only within a date range
+analysisResultsWeekdays = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
+    'WeekdaysOnly', true);
+
 % Default summary: one figure with two operator bar-chart subplots
 plotAnalysisResults(analysisResults);
 
 % Time-series mode only displays time-series figures
 plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true);
 
-% Restrict time-series plots to the latest 6 retrospective months
-plotAnalysisResults(analysisResults, ...
-    'CreateTimeSeriesPlot', true, ...
-    'RetrospectiveMonths', 6);
+% Time-series plots use whatever date window is present in analysisResults
+plotAnalysisResults(analysisResultsWindow, 'CreateTimeSeriesPlot', true);
 
 % Add individual operator-day markers without connecting sparse NaN gaps
 plotAnalysisResults(analysisResults, ...
     'CreateTimeSeriesPlot', true, ...
-    'ShowIndividualOperatorTraces', true, ...
-    'RetrospectiveMonths', 6);
+    'ShowIndividualOperatorTraces', true);
 ```
 
-Time-series mode creates a flip-ratio figure and an idle-time figure. Individual operator traces are marker-only to avoid misleading line fragments across missing days.
+Time-series mode creates a flip-ratio figure and an idle-time figure. Individual operator traces are marker-only to avoid misleading line fragments across missing days. Date-window and weekday filtering belong in `analyzeHistoricalData`, so summaries and plots stay consistent.
 
 ## Total: 14 MATLAB Scripts
 All production scripts are now organized in this single location for better project structure.

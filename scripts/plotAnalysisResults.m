@@ -5,7 +5,7 @@ function plotAnalysisResults(analysisResults, varargin)
 % Version: 2.2.0
 %
 % Available Plots and Metrics
-% - Operator bar charts (rendered by default when time-series mode is off):
+% - Operator bar charts (rendered only when no specific Create* plot flag is set):
 %   - Lab flips per operator turnover by operator (% of same-operator turnovers)
 %   - Median idle time per turnover by operator (minutes per turnover)
 %
@@ -14,6 +14,10 @@ function plotAnalysisResults(analysisResults, varargin)
 %     lab flips per operator turnover
 %   - Selectable procedure-time metrics per operator for the chosen procedure:
 %       'mean', 'median', 'std', 'min', 'max', 'p25', 'p75', 'p90'
+%
+% - Idle/flip correlation plot (enable with 'CreateIdleFlipCorrelationPlot', true):
+%   - Operator lab flips per operator turnover (%) vs median idle time per turnover
+%   - Data points are labeled with operator initials
 %
 % - Time series plot (enable with 'CreateTimeSeriesPlot', true):
 %   - Figure 1: average operator flip ratio and department flip ratio over time
@@ -34,31 +38,34 @@ function plotAnalysisResults(analysisResults, varargin)
 %
 % Optional Parameters:
 %   'CreateCorrelationPlot' - logical, create correlation plot (default: false)
+%   'CreateIdleFlipCorrelationPlot' - logical, create operator flip/idle
+%                                     correlation plot (default: false)
 %   'CreateTimeSeriesPlot'  - logical, create time series plot (default: false)
 %   'ShowIndividualOperatorTraces' - logical, show the optional individual
 %                                    operator trace figure when plotting
 %                                    time series data (default: false)
-%   'RetrospectiveMonths' - positive scalar, plot only the latest N months
-%                           in time-series mode (default: all dates)
 %   'CreateBoxPlots'        - logical, create box and whisker plots (default: false)
 %   'CreateDailyDeptScatter' - logical, plot daily dept idle/turnover vs flip/turnover and avg concurrent labs (default: false)
 %   'SelectedProcedure'     - string, procedure for correlation (default: auto-select)
 %   'SelectedMetric'        - string, metric for correlation (default: auto-select)
 %
+% If any Create* plot flag is true, only the requested plot type(s) are
+% rendered. The default operator bar-chart summary is skipped.
+%
 % Examples:
 %   plotAnalysisResults(analysisResults)  % Basic plots only
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true)
+%   plotAnalysisResults(analysisResults, 'CreateIdleFlipCorrelationPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true, 'CreateTimeSeriesPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'ShowIndividualOperatorTraces', true)
-%   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'RetrospectiveMonths', 6)
 %   plotAnalysisResults(analysisResults, 'CreateBoxPlots', true)
 
 % Parse optional parameters
 p = inputParser();
 addParameter(p, 'CreateCorrelationPlot', false, @islogical);
+addParameter(p, 'CreateIdleFlipCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
 addParameter(p, 'ShowIndividualOperatorTraces', false, @islogical);
-addParameter(p, 'RetrospectiveMonths', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x > 0 && floor(x) == x));
 addParameter(p, 'CreateBoxPlots', false, @islogical);
 addParameter(p, 'CreateDailyDeptScatter', false, @islogical);
 addParameter(p, 'SelectedProcedure', '', @ischar);
@@ -66,16 +73,18 @@ addParameter(p, 'SelectedMetric', '', @ischar);
 parse(p, varargin{:});
 
 doCreateCorrelationPlot = p.Results.CreateCorrelationPlot;
+doCreateIdleFlipCorrelationPlot = p.Results.CreateIdleFlipCorrelationPlot;
 doCreateTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
 doShowIndividualOperatorTraces = p.Results.ShowIndividualOperatorTraces;
-retrospectiveMonths = p.Results.RetrospectiveMonths;
 doCreateBoxPlots = p.Results.CreateBoxPlots;
 doCreateDailyDeptScatter = p.Results.CreateDailyDeptScatter;
 selectedProcedure = p.Results.SelectedProcedure;
 selectedMetric = p.Results.SelectedMetric;
+specificPlotRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
+    doCreateTimeSeriesPlot || doCreateBoxPlots || doCreateDailyDeptScatter;
 
 if doCreateTimeSeriesPlot
-    createTimeSeriesPlot(analysisResults, doShowIndividualOperatorTraces, retrospectiveMonths);
+    createTimeSeriesPlot(analysisResults, doShowIndividualOperatorTraces);
     return;
 end
 
@@ -171,7 +180,9 @@ validOperators = validOperators(sortIdx);
 
 flipsPerTurnoverRatio = flipsPerTurnoverRatio .* 100;
 
-createOperatorSummaryBarFigure(validOperators, flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio);
+if ~specificPlotRequested
+    createOperatorSummaryBarFigure(validOperators, flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio);
+end
 
 % Create correlation plot if requested
 if doCreateCorrelationPlot
@@ -192,6 +203,10 @@ if doCreateCorrelationPlot
     else
         fprintf('Correlation plot cancelled or no valid selection made.\n');
     end
+end
+
+if doCreateIdleFlipCorrelationPlot
+    createIdleFlipCorrelationPlot(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators);
 end
 
 % Create box plots if requested
@@ -236,6 +251,174 @@ for i = 1:length(medianIdleTimeToTurnoverRatio)
     text(ax2, i, medianIdleTimeToTurnoverRatio(i) + idleLabelOffset, sprintf('%.1f', medianIdleTimeToTurnoverRatio(i)), ...
          'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom');
 end
+end
+
+function createIdleFlipCorrelationPlot(flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio, validOperators)
+validData = isfinite(flipsPerTurnoverRatio) & isfinite(medianIdleTimeToTurnoverRatio);
+flipValues = flipsPerTurnoverRatio(validData);
+idleValues = medianIdleTimeToTurnoverRatio(validData);
+operatorLabels = validOperators(validData);
+
+if isempty(flipValues)
+    msgbox('No valid operator flip/idle data available for correlation plot.', 'No Data', 'warn');
+    return;
+end
+
+fig = figure('Position', [300, 300, 1200, 850], 'Color', 'w', 'InvertHardcopy', 'off');
+ax = axes('Parent', fig);
+hold(ax, 'on');
+
+scatter(ax, flipValues, idleValues, 90, [0.00 0.45 0.74], 'filled', ...
+    'MarkerFaceAlpha', 0.75, 'MarkerEdgeColor', [0.10 0.10 0.10]);
+
+initialLabels = createOperatorInitialLabels(operatorLabels);
+xOffset = max(1, range(flipValues) * 0.015);
+yOffset = max(1, range(idleValues) * 0.015);
+for i = 1:length(operatorLabels)
+    text(ax, flipValues(i) + xOffset, idleValues(i) + yOffset, initialLabels{i}, ...
+        'FontSize', 9, 'FontWeight', 'bold', 'Color', [0.10 0.10 0.10], ...
+        'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom');
+end
+
+if length(flipValues) > 2
+    correlationCoeff = corrcoef(flipValues, idleValues);
+    rValue = correlationCoeff(1, 2);
+    p = polyfit(flipValues, idleValues, 1);
+    xTrend = linspace(min(flipValues), max(flipValues), 100);
+    yTrend = polyval(p, xTrend);
+    plot(ax, xTrend, yTrend, '-', 'Color', [0.85 0.33 0.10], ...
+        'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
+    addTrendStatsAnnotation(ax, calculateLinearTrendStats(flipValues, idleValues), '');
+    title(ax, sprintf('Operator Flip Ratio vs Idle Time per Turnover (r = %.3f)', rValue));
+    fprintf('Correlation between lab flips per operator turnover and median idle time per turnover: r = %.3f\n', rValue);
+else
+    title(ax, 'Operator Flip Ratio vs Idle Time per Turnover');
+    fprintf('Not enough operators for flip/idle correlation analysis (%d points)\n', length(flipValues));
+end
+
+xlabel(ax, 'Lab Flips per Operator Turnover (%)');
+ylabel(ax, 'Median Idle Time per Turnover (minutes)');
+set(ax, 'Color', 'w', 'Box', 'off', 'FontSize', 11, ...
+    'XColor', [0.20 0.20 0.20], 'YColor', [0.20 0.20 0.20], ...
+    'GridColor', [0.85 0.85 0.85], 'GridAlpha', 1.0);
+set(get(ax, 'Title'), 'Color', [0.10 0.10 0.10]);
+set(get(ax, 'XLabel'), 'Color', [0.10 0.10 0.10]);
+set(get(ax, 'YLabel'), 'Color', [0.10 0.10 0.10]);
+grid(ax, 'on');
+padAxisLimits(ax, flipValues, idleValues);
+hold(ax, 'off');
+end
+
+function labels = createOperatorInitialLabels(operatorNames)
+labels = cell(size(operatorNames));
+labelCounts = containers.Map('KeyType', 'char', 'ValueType', 'double');
+
+for i = 1:length(operatorNames)
+    baseLabel = createOperatorInitials(operatorNames{i});
+    if isKey(labelCounts, baseLabel)
+        labelCounts(baseLabel) = labelCounts(baseLabel) + 1;
+        labels{i} = sprintf('%s%d', baseLabel, labelCounts(baseLabel));
+    else
+        labelCounts(baseLabel) = 1;
+        labels{i} = baseLabel;
+    end
+end
+end
+
+function initials = createOperatorInitials(operatorName)
+nameText = upper(strtrim(char(operatorName)));
+if contains(nameText, ',')
+    nameParts = strsplit(nameText, ',');
+    orderedName = strtrim(sprintf('%s %s', nameParts{2}, nameParts{1}));
+else
+    orderedName = nameText;
+end
+
+tokens = regexp(orderedName, '[A-Z]+', 'match');
+initials = '';
+for i = 1:length(tokens)
+    initials = [initials tokens{i}(1)]; %#ok<AGROW>
+end
+
+if isempty(initials)
+    initials = 'OP';
+end
+end
+
+function padAxisLimits(ax, xValues, yValues)
+xMin = min(xValues);
+xMax = max(xValues);
+yMin = min(yValues);
+yMax = max(yValues);
+xPad = max(1, (xMax - xMin) * 0.08);
+yPad = max(1, (yMax - yMin) * 0.08);
+
+xlim(ax, [xMin - xPad, xMax + xPad]);
+ylim(ax, [yMin - yPad, yMax + yPad]);
+end
+
+function trendStats = calculateLinearTrendStats(xValues, yValues)
+xValues = xValues(:);
+yValues = yValues(:);
+validMask = isfinite(xValues) & isfinite(yValues);
+xValues = xValues(validMask);
+yValues = yValues(validMask);
+
+trendStats = struct('slope', NaN, 'rSquared', NaN);
+if numel(xValues) < 3
+    return;
+end
+
+try
+    model = fitlm(xValues, yValues);
+    trendStats.slope = model.Coefficients.Estimate(2);
+    trendStats.rSquared = model.Rsquared.Ordinary;
+catch
+    p = polyfit(xValues, yValues, 1);
+    fittedValues = polyval(p, xValues);
+    trendStats.slope = p(1);
+    trendStats.rSquared = calculateFallbackRSquared(yValues, fittedValues);
+end
+end
+
+function rSquared = calculateFallbackRSquared(observedValues, fittedValues)
+observedValues = observedValues(:);
+fittedValues = fittedValues(:);
+totalSumSquares = sum((observedValues - mean(observedValues)).^2);
+if totalSumSquares == 0
+    rSquared = NaN;
+else
+    residualSumSquares = sum((observedValues - fittedValues).^2);
+    rSquared = 1 - (residualSumSquares / totalSumSquares);
+end
+end
+
+function addTrendStatsAnnotation(ax, trendStats, slopeUnit)
+if nargin < 3
+    slopeUnit = '';
+end
+
+if isempty(slopeUnit)
+    slopeText = sprintf('Slope = %.3g', trendStats.slope);
+else
+    slopeText = sprintf('Slope = %.3g%s', trendStats.slope, slopeUnit);
+end
+
+if isfinite(trendStats.rSquared)
+    rSquaredText = sprintf('R^2 = %.3f', trendStats.rSquared);
+else
+    rSquaredText = 'R^2 = NA';
+end
+
+text(ax, 0.98, 0.93, sprintf('%s\n%s', slopeText, rSquaredText), ...
+    'Units', 'normalized', ...
+    'HorizontalAlignment', 'right', ...
+    'VerticalAlignment', 'top', ...
+    'FontSize', 9, ...
+    'Color', [0.10 0.10 0.10], ...
+    'BackgroundColor', 'w', ...
+    'EdgeColor', [0.80 0.80 0.80], ...
+    'Margin', 4);
 end
 
 function [selectedProcedure, selectedMetric] = selectProcedureAndMetric(analysisResults)
@@ -418,6 +601,7 @@ if length(correlationValues) > 2
     xTrend = linspace(min(correlationValues), max(correlationValues), 100);
     yTrend = polyval(p, xTrend);
     plot(xTrend, yTrend, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(correlationValues, correlationFlipRatios), '');
     
     % Create title with correlation
     titleStr = sprintf('%s %s vs Lab Flips per Operator Turnover (r = %.3f)', selectedProcedure, upper(selectedMetric), rValue);
@@ -493,6 +677,7 @@ if ~isempty(newProcedure) && ~isempty(newMetric)
             xTrend = linspace(min(newCorrelationValues), max(newCorrelationValues), 100);
             yTrend = polyval(p, xTrend);
             plot(xTrend, yTrend, 'r-', 'LineWidth', 2);
+            addTrendStatsAnnotation(gca, calculateLinearTrendStats(newCorrelationValues, newCorrelationFlipRatios), '');
             
             % Create title with correlation
             titleStr = sprintf('%s %s vs Lab Flips per Operator Turnover (r = %.3f)', newProcedure, upper(newMetric), rValue);
@@ -535,7 +720,7 @@ else
 end
 end
 
-function createTimeSeriesPlot(analysisResults, showIndividualOperatorTraces, retrospectiveMonths)
+function createTimeSeriesPlot(analysisResults, showIndividualOperatorTraces)
 % Create retrospective time series figures:
 % 1) average operator flip ratio and department flip ratio
 % 2) median operator idle time per turnover
@@ -543,13 +728,9 @@ function createTimeSeriesPlot(analysisResults, showIndividualOperatorTraces, ret
 % Input:
 %   analysisResults - structure returned by analyzeHistoricalData
 %   showIndividualOperatorTraces - logical, show optional operator-trace figure
-%   retrospectiveMonths - positive scalar months to show, or [] for all dates
 
 if nargin < 2
     showIndividualOperatorTraces = false;
-end
-if nargin < 3
-    retrospectiveMonths = [];
 end
 
 if ~isfield(analysisResults, 'operatorAnalysis') || ...
@@ -575,15 +756,9 @@ if isempty(dateObjects)
     return;
 end
 
-[dateObjects, analyzedDates, selectedDateIndices] = filterRetrospectiveDates(dateObjects, analyzedDates, retrospectiveMonths);
-if isempty(dateObjects)
-    msgbox('No dates remain after applying the retrospective month filter.', 'No Data', 'warn');
-    return;
-end
-
 operatorNames = keys(caseStats);
 numOperators = length(operatorNames);
-numDates = length(selectedDateIndices);
+numDates = length(analyzedDates);
 
 if numOperators == 0 || numDates == 0
     msgbox('No operator data available for time series plot.', 'Error', 'error');
@@ -602,9 +777,8 @@ for opIdx = 1:numOperators
        isKey(analysisResults.labFlipAnalysis.operatorFlipStats, opName)
         flipArray = analysisResults.labFlipAnalysis.operatorFlipStats(opName);
         for dateIdx = 1:numDates
-            sourceDateIdx = selectedDateIndices(dateIdx);
-            casesThisDay = caseArray(sourceDateIdx);
-            flipsThisDay = flipArray(sourceDateIdx);
+            casesThisDay = caseArray(dateIdx);
+            flipsThisDay = flipArray(dateIdx);
             if ~isnan(casesThisDay) && casesThisDay > 1 && ~isnan(flipsThisDay)
                 turnovers = casesThisDay - 1;
                 if turnovers > 0
@@ -617,7 +791,7 @@ end
 
 avgOperatorFlipRatio = nanmean(flipRatioMatrix, 1);
 [deptFlipPerOperatorTurnover, deptDateObjects] = buildDepartmentFlipSeries(analysisResults, analyzedDates);
-[dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNamesForIdle] = buildOperatorIdleSeries(analysisResults, selectedDateIndices);
+[dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNamesForIdle] = buildOperatorIdleSeries(analysisResults, numDates);
 
 if showIndividualOperatorTraces
     createIndividualOperatorTracesFigure(dateObjects, flipRatioMatrix, operatorLabels);
@@ -641,19 +815,6 @@ if validOperatorCount > 0
 else
     fprintf('No valid operator time series data found for lab-flips-per-operator-turnover ratios\n');
 end
-end
-
-function [filteredDateObjects, filteredDateStrings, selectedDateIndices] = filterRetrospectiveDates(dateObjects, dateStrings, retrospectiveMonths)
-selectedDateIndices = 1:length(dateObjects);
-
-if ~isempty(retrospectiveMonths)
-    latestDate = max(dateObjects);
-    startDate = latestDate - calmonths(retrospectiveMonths);
-    selectedDateIndices = find(dateObjects >= startDate & dateObjects <= latestDate);
-end
-
-filteredDateObjects = dateObjects(selectedDateIndices);
-filteredDateStrings = dateStrings(selectedDateIndices);
 end
 
 function dateObjects = convertDateStringsToDatetime(dateStrings)
@@ -703,8 +864,7 @@ for i = 1:length(analyzedDates)
 end
 end
 
-function [dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNames] = buildOperatorIdleSeries(analysisResults, selectedDateIndices)
-numDates = length(selectedDateIndices);
+function [dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNames] = buildOperatorIdleSeries(analysisResults, numDates)
 dailyMedianIdlePerTurnover = NaN(numDates, 1);
 dailyOperatorIdlePerTurnoverMatrix = [];
 operatorNames = {};
@@ -723,15 +883,14 @@ numOperators = length(operatorNames);
 dailyOperatorIdlePerTurnoverMatrix = NaN(numOperators, numDates);
 
 for dateIdx = 1:numDates
-    sourceDateIdx = selectedDateIndices(dateIdx);
     dailyIdlePerTurnover = [];
     for opIdx = 1:length(operatorNames)
         opName = operatorNames{opIdx};
         caseArray = caseStats(opName);
         idleArray = idleTimeStats(opName);
-        if sourceDateIdx <= length(caseArray) && sourceDateIdx <= length(idleArray)
-            casesThisDay = caseArray(sourceDateIdx);
-            idleThisDay = idleArray(sourceDateIdx);
+        if dateIdx <= length(caseArray) && dateIdx <= length(idleArray)
+            casesThisDay = caseArray(dateIdx);
+            idleThisDay = idleArray(dateIdx);
             if ~isnan(casesThisDay) && casesThisDay > 1 && ~isnan(idleThisDay)
                 turnovers = casesThisDay - 1;
                 if turnovers > 0
@@ -782,6 +941,9 @@ if any(validAvgData)
         trendLine = polyval(p, dateNums);
         plot(ax, validDates, trendLine, '-', 'Color', trendLineColor, ...
             'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
+        trendStats = calculateLinearTrendStats(dateNums, validValues);
+        trendStats.slope = trendStats.slope * 30;
+        addTrendStatsAnnotation(ax, trendStats, '/month');
     end
 end
 
@@ -824,6 +986,9 @@ if any(validAvgData)
         trendLine = polyval(p, dateNums);
         plot(ax1, validDates, trendLine, '-', 'Color', trendLineColor, ...
             'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
+        trendStats = calculateLinearTrendStats(dateNums, validValues);
+        trendStats.slope = trendStats.slope * 30;
+        addTrendStatsAnnotation(ax1, trendStats, '/month');
     end
 end
 title(ax1, 'Average Operator Lab Flips per Operator Turnover Over Time');
@@ -855,6 +1020,9 @@ if any(validDeptData)
         trendLine = polyval(p, dateNums);
         plot(ax2, validDates, trendLine, '-', 'Color', trendLineColor, ...
             'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
+        trendStats = calculateLinearTrendStats(dateNums, validValues);
+        trendStats.slope = trendStats.slope * 30;
+        addTrendStatsAnnotation(ax2, trendStats, '/month');
     end
 end
 title(ax2, 'Department Lab Flips per Operator Turnover Over Time');
@@ -915,6 +1083,9 @@ if any(validMedian)
             'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
         legendHandles(end+1) = trendHandle; %#ok<AGROW>
         legendLabels{end+1} = 'Linear Trend'; %#ok<AGROW>
+        trendStats = calculateLinearTrendStats(dateNums, validValues);
+        trendStats.slope = trendStats.slope * 30;
+        addTrendStatsAnnotation(ax, trendStats, '/month');
     end
 end
 
@@ -1122,6 +1293,7 @@ if sum(mask1) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1144,6 +1316,7 @@ if sum(mask2) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1166,6 +1339,7 @@ if sum(mask3) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1190,6 +1364,7 @@ if sum(mask4) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1212,6 +1387,7 @@ if sum(mask5) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1236,6 +1412,7 @@ if sum(mask6) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1258,6 +1435,7 @@ if sum(mask7) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
@@ -1280,6 +1458,7 @@ if sum(mask8) >= 2
     xl = [min(x), max(x)];
     yl = polyval(p, xl);
     plot(xl, yl, 'r-', 'LineWidth', 2);
+    addTrendStatsAnnotation(gca, calculateLinearTrendStats(x, y), '');
     [rP, pP] = corr(x, y, 'Type','Pearson');
     [rS, pS] = corr(x, y, 'Type','Spearman');
     legend('Days', sprintf('Fit: y = %.2fx%+.2f\nPearson r=%.2f (p=%.3f)\nSpearman r=%.2f (p=%.3f)', p(1), p(2), rP, pP, rS, pS), 'Location','best');
