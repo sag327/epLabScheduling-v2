@@ -5,7 +5,11 @@ function plotAnalysisResults(analysisResults, varargin)
 % Version: 2.2.0
 %
 % Available Plots and Metrics
-% - Operator bar charts (rendered only when no specific Create* plot flag is set):
+% - Default manuscript-ready suite (rendered when no specific Create* flag is set):
+%   - Department flip ratio and pooled idle-time time series
+%   - Combined department and operator flip-ratio vs idle-time associations
+%
+% - Operator bar charts (enable with 'CreateOperatorSummaryFigure', true):
 %   - Lab flips per operator turnover by operator (% of same-operator turnovers)
 %   - Median idle time per turnover by operator (minutes per turnover)
 %
@@ -20,9 +24,18 @@ function plotAnalysisResults(analysisResults, varargin)
 %   - Data points are labeled with operator initials
 %
 % - Time series plot (enable with 'CreateTimeSeriesPlot', true):
-%   - Figure 1: average operator flip ratio and department flip ratio over time
+%   - Figure 1: pooled included-operator and department flip ratios over time
 %   - Figure 2: median operator idle time per turnover over time
 %   - Optional operator-trace figure when 'ShowIndividualOperatorTraces' is true
+%   - Reads precomputed day/week/month/quarter/year series from analysisResults
+%
+% - Manuscript figures:
+%   - 'CreateManuscriptTimeSeriesFigure': publication-styled department flip
+%     ratio and pooled department idle time by stored time bin
+%   - 'CreateManuscriptAssociationFigure': publication-styled combined
+%     department and operator association figure
+%   - 'CreateManuscriptOperatorAssociationFigure': backwards-compatible alias
+%     for the combined manuscript association figure
 %
 % - Box plots (enable with 'CreateBoxPlots', true):
 %   - Distribution of operator lab-flips-per-operator-turnover ratios (%)
@@ -44,20 +57,43 @@ function plotAnalysisResults(analysisResults, varargin)
 %   'ShowIndividualOperatorTraces' - logical, show the optional individual
 %                                    operator trace figure when plotting
 %                                    time series data (default: false)
+%   'TimeBin'               - displayed time-series granularity: 'day',
+%                             'week', 'month', 'quarter', or 'year'
+%                             (default: 'day' generally; 'quarter' for
+%                             manuscript figures when omitted)
+%   'CreateManuscriptTimeSeriesFigure' - logical, create publication-styled
+%                                        departmental time-series figure
+%   'CreateManuscriptAssociationFigure' - logical, create the publication-styled
+%                                         combined association figure
+%   'CreateManuscriptOperatorAssociationFigure' - logical, backwards-compatible
+%                                         alias for the combined association figure
+%   'ShowOperatorInitialLabels' - logical, annotate manuscript operator
+%                                 points with initials (default: false)
+%   'CreateOperatorSummaryFigure' - logical, create the exploratory operator
+%                                   two-panel bar-chart summary
+%   'ExportPath'            - manuscript export filename prefix (default: '')
+%   'ExportFormat'          - 'pdf' vector output or 'tiff' raster output
+%                             for manuscript figures (default: 'pdf')
+%   'ExportResolution'      - TIFF export DPI (default: 600)
 %   'CreateBoxPlots'        - logical, create box and whisker plots (default: false)
 %   'CreateDailyDeptScatter' - logical, plot daily dept idle/turnover vs flip/turnover and avg concurrent labs (default: false)
 %   'SelectedProcedure'     - string, procedure for correlation (default: auto-select)
 %   'SelectedMetric'        - string, metric for correlation (default: auto-select)
 %
-% If any Create* plot flag is true, only the requested plot type(s) are
-% rendered. The default operator bar-chart summary is skipped.
+% If any Create* plot flag is true, only requested plot type(s) are rendered.
+% With no Create* flags, the two manuscript-ready figures are rendered.
 %
 % Examples:
-%   plotAnalysisResults(analysisResults)  % Basic plots only
+%   plotAnalysisResults(analysisResults)  % Default two-figure manuscript suite
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateIdleFlipCorrelationPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true, 'CreateTimeSeriesPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'ShowIndividualOperatorTraces', true)
+%   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'TimeBin', 'month')
+%   plotAnalysisResults(analysisResults, 'CreateManuscriptTimeSeriesFigure', true)
+%   plotAnalysisResults(analysisResults, 'CreateManuscriptAssociationFigure', true, 'TimeBin', 'quarter')
+%   plotAnalysisResults(analysisResults, 'CreateManuscriptAssociationFigure', true, 'ShowOperatorInitialLabels', true)
+%   plotAnalysisResults(analysisResults, 'CreateOperatorSummaryFigure', true)
 %   plotAnalysisResults(analysisResults, 'CreateBoxPlots', true)
 
 % Parse optional parameters
@@ -66,6 +102,15 @@ addParameter(p, 'CreateCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateIdleFlipCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
 addParameter(p, 'ShowIndividualOperatorTraces', false, @islogical);
+addParameter(p, 'TimeBin', 'day', @isValidTimeBinInput);
+addParameter(p, 'CreateManuscriptTimeSeriesFigure', false, @islogical);
+addParameter(p, 'CreateManuscriptAssociationFigure', false, @islogical);
+addParameter(p, 'CreateManuscriptOperatorAssociationFigure', false, @islogical);
+addParameter(p, 'ShowOperatorInitialLabels', false, @islogical);
+addParameter(p, 'CreateOperatorSummaryFigure', false, @islogical);
+addParameter(p, 'ExportPath', '', @(x) ischar(x) || (isstring(x) && isscalar(x)));
+addParameter(p, 'ExportFormat', 'pdf', @isValidExportFormatInput);
+addParameter(p, 'ExportResolution', 600, @(x) isnumeric(x) && isscalar(x) && isfinite(x) && x > 0);
 addParameter(p, 'CreateBoxPlots', false, @islogical);
 addParameter(p, 'CreateDailyDeptScatter', false, @islogical);
 addParameter(p, 'SelectedProcedure', '', @ischar);
@@ -76,15 +121,60 @@ doCreateCorrelationPlot = p.Results.CreateCorrelationPlot;
 doCreateIdleFlipCorrelationPlot = p.Results.CreateIdleFlipCorrelationPlot;
 doCreateTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
 doShowIndividualOperatorTraces = p.Results.ShowIndividualOperatorTraces;
+timeBin = lower(char(string(p.Results.TimeBin)));
+doCreateManuscriptTimeSeriesFigure = p.Results.CreateManuscriptTimeSeriesFigure;
+doCreateManuscriptAssociationFigure = p.Results.CreateManuscriptAssociationFigure;
+doCreateManuscriptOperatorAssociationFigure = p.Results.CreateManuscriptOperatorAssociationFigure;
+doShowOperatorInitialLabels = p.Results.ShowOperatorInitialLabels;
+doCreateOperatorSummaryFigure = p.Results.CreateOperatorSummaryFigure;
+exportPath = char(string(p.Results.ExportPath));
+exportFormat = lower(char(string(p.Results.ExportFormat)));
+exportResolution = p.Results.ExportResolution;
 doCreateBoxPlots = p.Results.CreateBoxPlots;
 doCreateDailyDeptScatter = p.Results.CreateDailyDeptScatter;
 selectedProcedure = p.Results.SelectedProcedure;
 selectedMetric = p.Results.SelectedMetric;
 specificPlotRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
-    doCreateTimeSeriesPlot || doCreateBoxPlots || doCreateDailyDeptScatter;
+    doCreateTimeSeriesPlot || doCreateManuscriptTimeSeriesFigure || ...
+    doCreateManuscriptAssociationFigure || doCreateManuscriptOperatorAssociationFigure || ...
+    doCreateOperatorSummaryFigure || doCreateBoxPlots || doCreateDailyDeptScatter;
+
+defaultManuscriptSuite = ~specificPlotRequested;
+if defaultManuscriptSuite
+    doCreateManuscriptTimeSeriesFigure = true;
+    doCreateManuscriptAssociationFigure = true;
+end
+
+if (defaultManuscriptSuite || doCreateManuscriptTimeSeriesFigure || ...
+        doCreateManuscriptAssociationFigure || doCreateManuscriptOperatorAssociationFigure) && ...
+        any(strcmp(p.UsingDefaults, 'TimeBin'))
+    timeBin = 'quarter';
+end
+
+if doCreateManuscriptTimeSeriesFigure || doCreateManuscriptAssociationFigure || doCreateManuscriptOperatorAssociationFigure
+    if doCreateManuscriptTimeSeriesFigure
+        timeSeries = getStoredTimeSeries(analysisResults, timeBin);
+        manuscriptTimeSeriesFigure = createManuscriptTimeSeriesFigure(timeSeries, timeBin);
+        exportManuscriptFigure(manuscriptTimeSeriesFigure, exportPath, ...
+            'time_series', exportFormat, exportResolution);
+    end
+    if doCreateManuscriptAssociationFigure || doCreateManuscriptOperatorAssociationFigure
+        timeSeries = getStoredTimeSeries(analysisResults, timeBin);
+        operatorAssociation = getManuscriptOperatorAssociation(analysisResults);
+        manuscriptAssociationFigure = createManuscriptAssociationFigure( ...
+            timeSeries, operatorAssociation, doShowOperatorInitialLabels, timeBin);
+        exportManuscriptFigure(manuscriptAssociationFigure, exportPath, ...
+            'association', exportFormat, exportResolution);
+    end
+    exploratoryRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
+        doCreateTimeSeriesPlot || doCreateOperatorSummaryFigure || doCreateBoxPlots || doCreateDailyDeptScatter;
+    if defaultManuscriptSuite || ~exploratoryRequested
+        return;
+    end
+end
 
 if doCreateTimeSeriesPlot
-    createTimeSeriesPlot(analysisResults, doShowIndividualOperatorTraces);
+    createTimeSeriesPlot(analysisResults, doShowIndividualOperatorTraces, timeBin);
     return;
 end
 
@@ -180,7 +270,7 @@ validOperators = validOperators(sortIdx);
 
 flipsPerTurnoverRatio = flipsPerTurnoverRatio .* 100;
 
-if ~specificPlotRequested
+if doCreateOperatorSummaryFigure
     createOperatorSummaryBarFigure(validOperators, flipsPerTurnoverRatio, medianIdleTimeToTurnoverRatio);
 end
 
@@ -720,93 +810,45 @@ else
 end
 end
 
-function createTimeSeriesPlot(analysisResults, showIndividualOperatorTraces)
-% Create retrospective time series figures:
-% 1) average operator flip ratio and department flip ratio
-% 2) median operator idle time per turnover
-%
-% Input:
-%   analysisResults - structure returned by analyzeHistoricalData
-%   showIndividualOperatorTraces - logical, show optional operator-trace figure
-
+function createTimeSeriesPlot(analysisResults, showIndividualOperatorTraces, timeBin)
+% Create retrospective time series figures from stored binned summaries.
 if nargin < 2
     showIndividualOperatorTraces = false;
 end
+if nargin < 3
+    timeBin = 'day';
+end
 
-if ~isfield(analysisResults, 'operatorAnalysis') || ...
-   ~isfield(analysisResults.operatorAnalysis, 'caseStats') || ...
-   ~isfield(analysisResults.operatorAnalysis, 'idleTimeStats') || ...
-   ~isfield(analysisResults.operatorAnalysis, 'analyzedDates')
-    msgbox('No time series data available. Operator analysis with schedules is required.', 'Error', 'error');
+timeSeries = getStoredTimeSeries(analysisResults, timeBin);
+dateObjects = timeSeries.binStartDates;
+operators = timeSeries.operators;
+department = timeSeries.department;
+trends = timeSeries.trends;
+if isempty(dateObjects) || isempty(operators.operatorNames)
+    warning('No stored %s time-series data available to plot.', timeBin);
     return;
 end
-
-caseStats = analysisResults.operatorAnalysis.caseStats;
-idleTimeStats = analysisResults.operatorAnalysis.idleTimeStats;
-analyzedDates = analysisResults.operatorAnalysis.analyzedDates;
-
-if isempty(analyzedDates)
-    msgbox('No analyzed dates found in the data.', 'Error', 'error');
-    return;
-end
-
-dateObjects = convertDateStringsToDatetime(analyzedDates);
-if isempty(dateObjects)
-    msgbox('Unable to parse dates for time series plot.', 'Error', 'error');
-    return;
-end
-
-operatorNames = keys(caseStats);
-numOperators = length(operatorNames);
-numDates = length(analyzedDates);
-
-if numOperators == 0 || numDates == 0
-    msgbox('No operator data available for time series plot.', 'Error', 'error');
-    return;
-end
-
-flipRatioMatrix = NaN(numOperators, numDates);
-operatorLabels = cell(numOperators, 1);
-for opIdx = 1:numOperators
-    opName = operatorNames{opIdx};
-    operatorLabels{opIdx} = opName;
-
-    caseArray = caseStats(opName);
-    if isfield(analysisResults, 'labFlipAnalysis') && ...
-       isfield(analysisResults.labFlipAnalysis, 'operatorFlipStats') && ...
-       isKey(analysisResults.labFlipAnalysis.operatorFlipStats, opName)
-        flipArray = analysisResults.labFlipAnalysis.operatorFlipStats(opName);
-        for dateIdx = 1:numDates
-            casesThisDay = caseArray(dateIdx);
-            flipsThisDay = flipArray(dateIdx);
-            if ~isnan(casesThisDay) && casesThisDay > 1 && ~isnan(flipsThisDay)
-                turnovers = casesThisDay - 1;
-                if turnovers > 0
-                    flipRatioMatrix(opIdx, dateIdx) = (flipsThisDay / turnovers) * 100;
-                end
-            end
-        end
-    end
-end
-
-avgOperatorFlipRatio = nanmean(flipRatioMatrix, 1);
-[deptFlipPerOperatorTurnover, deptDateObjects] = buildDepartmentFlipSeries(analysisResults, analyzedDates);
-[dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNamesForIdle] = buildOperatorIdleSeries(analysisResults, numDates);
 
 if showIndividualOperatorTraces
-    createIndividualOperatorTracesFigure(dateObjects, flipRatioMatrix, operatorLabels);
+    createIndividualOperatorTracesFigure(dateObjects, operators.flipRatioPercent, ...
+        operators.operatorNames, operators.pooledFlipRatioPercent, ...
+        trends.includedOperatorFlipRatioPercent, timeBin);
 end
 
-createFlipRatioSummaryFigure(dateObjects, avgOperatorFlipRatio, deptFlipPerOperatorTurnover);
-createOperatorIdleTimeTrendFigure(deptDateObjects, dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNamesForIdle, showIndividualOperatorTraces);
+createFlipRatioSummaryFigure(dateObjects, operators.pooledFlipRatioPercent, ...
+    department.labFlipPerOperatorTurnoverPercent, trends, timeBin);
+createOperatorIdleTimeTrendFigure(dateObjects, operators.medianIdleTimePerTurnover, ...
+    operators.idleTimePerTurnover, operators.operatorNames, ...
+    showIndividualOperatorTraces, trends.medianOperatorIdlePerTurnover, timeBin);
 
-validAvgData = ~isnan(avgOperatorFlipRatio);
-validOperatorCount = sum(any(~isnan(flipRatioMatrix), 2));
+validCohortData = ~isnan(operators.pooledFlipRatioPercent);
+validOperatorCount = sum(any(~isnan(operators.flipRatioPercent), 2));
 if validOperatorCount > 0
-    fprintf('Operator time series plot created with %d operators across %d dates\n', validOperatorCount, sum(validAvgData));
-    allValidRatios = flipRatioMatrix(~isnan(flipRatioMatrix));
+    fprintf('%s operator time series plot created with %d operators across %d bins\n', ...
+        timeBin, validOperatorCount, sum(validCohortData));
+    allValidRatios = operators.flipRatioPercent(~isnan(operators.flipRatioPercent));
     if ~isempty(allValidRatios)
-        fprintf('Summary statistics across valid operator-day flip ratios:\n');
+        fprintf('Summary statistics across valid operator-%s flip ratios:\n', timeBin);
         fprintf('  Mean: %.1f%%\n', mean(allValidRatios));
         fprintf('  Median: %.1f%%\n', median(allValidRatios));
         fprintf('  Std Dev: %.1f%%\n', std(allValidRatios));
@@ -817,101 +859,173 @@ else
 end
 end
 
-function dateObjects = convertDateStringsToDatetime(dateStrings)
-dateObjects = NaT(length(dateStrings), 1);
-for i = 1:length(dateStrings)
-    dateStr = dateStrings{i};
-    try
-        dateObjects(i) = datetime(dateStr, 'InputFormat', 'dd-MMM-yyyy');
-    catch
-        try
-            dateObjects(i) = datetime(dateStr);
-        catch
-            dateObjects = [];
-            return;
-        end
-    end
+function timeSeries = getStoredTimeSeries(analysisResults, timeBin)
+if ~isfield(analysisResults, 'timeSeriesAnalysis') || ...
+        ~isfield(analysisResults.timeSeriesAnalysis, timeBin)
+    error(['Time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData to create stored time-binned results.'], timeBin);
+end
+timeSeries = analysisResults.timeSeriesAnalysis.(timeBin);
+timeSeries = ensureManuscriptTimeSeriesCompatibility(timeSeries);
+end
+
+function timeSeries = ensureManuscriptTimeSeriesCompatibility(timeSeries)
+if ~isfield(timeSeries, 'trends')
+    timeSeries.trends = struct();
+end
+if ~isfield(timeSeries.trends, 'departmentFlipRatioPercent')
+    timeSeries.trends.departmentFlipRatioPercent = calculateDisplayTrendStats( ...
+        timeSeries.department.labFlipPerOperatorTurnoverPercent);
+end
+if ~isfield(timeSeries.trends, 'departmentOperatorIdlePerTurnover')
+    timeSeries.trends.departmentOperatorIdlePerTurnover = calculateDisplayTrendStats( ...
+        timeSeries.department.operatorIdlePerOperatorTurnover);
+end
+if ~isfield(timeSeries, 'relationships')
+    timeSeries.relationships = struct();
+end
+if ~isfield(timeSeries.relationships, 'departmentFlipVsIdle')
+    timeSeries.relationships.departmentFlipVsIdle = calculateDisplayRelationshipStats( ...
+        timeSeries.department.labFlipPerOperatorTurnoverPercent, ...
+        timeSeries.department.operatorIdlePerOperatorTurnover);
 end
 end
 
-function [deptFlipPerOperatorTurnover, dateObjects] = buildDepartmentFlipSeries(analysisResults, analyzedDates)
-dateObjects = convertDateStringsToDatetime(analyzedDates);
-deptFlipPerOperatorTurnover = NaN(length(analyzedDates), 1);
+function operatorAssociation = getManuscriptOperatorAssociation(analysisResults)
+if isfield(analysisResults, 'manuscriptOperatorAssociation') && ...
+        isfield(analysisResults.manuscriptOperatorAssociation, 'pooledFlipRatioPercent')
+    operatorAssociation = analysisResults.manuscriptOperatorAssociation;
+    return;
+end
+if ~isfield(analysisResults, 'timeSeriesAnalysis') || ...
+        ~isfield(analysisResults.timeSeriesAnalysis, 'day') || ...
+        ~isfield(analysisResults.timeSeriesAnalysis.day, 'operators')
+    error(['Operator manuscript data are unavailable. Rerun analyzeHistoricalData ' ...
+        'to create manuscript-ready operator summaries.']);
+end
+dailyOperators = analysisResults.timeSeriesAnalysis.day.operators;
+operatorAssociation = struct();
+operatorAssociation.operatorNames = dailyOperators.operatorNames;
+operatorAssociation.totalLabFlips = sum(dailyOperators.totalFlips, 2);
+operatorAssociation.totalOperatorTurnovers = sum(dailyOperators.flipEligibleOperatorTurnovers, 2);
+operatorAssociation.pooledFlipRatioPercent = NaN(size(operatorAssociation.totalOperatorTurnovers));
+validTurnovers = operatorAssociation.totalOperatorTurnovers > 0;
+operatorAssociation.pooledFlipRatioPercent(validTurnovers) = ...
+    operatorAssociation.totalLabFlips(validTurnovers) ./ ...
+    operatorAssociation.totalOperatorTurnovers(validTurnovers) * 100;
+operatorAssociation.medianIdleTimePerTurnover = median(dailyOperators.idleTimePerTurnover, 2, 'omitnan');
+operatorAssociation.medianIdleTimePerTurnover(all(~isfinite(dailyOperators.idleTimePerTurnover), 2)) = NaN;
+operatorAssociation.relationship = calculateDisplayRelationshipStats( ...
+    operatorAssociation.pooledFlipRatioPercent, operatorAssociation.medianIdleTimePerTurnover);
+end
 
+function fig = createManuscriptTimeSeriesFigure(timeSeries, timeBin)
+dateObjects = timeSeries.binStartDates;
+department = timeSeries.department;
+trends = timeSeries.trends;
 if isempty(dateObjects)
-    return;
+    error('No stored %s department time-series data available for manuscript figure.', timeBin);
 end
 
-if ~isfield(analysisResults, 'scheduleAnalysis') || ...
-   ~isfield(analysisResults.scheduleAnalysis, 'dailyEfficiency') || ...
-   ~isfield(analysisResults.scheduleAnalysis.dailyEfficiency, 'byDate') || ...
-   isempty(analysisResults.scheduleAnalysis.dailyEfficiency.byDate)
-    warning('Department daily efficiency metrics not available for department flip-ratio plot.');
-    return;
+observedColor = [0.08 0.20 0.38];
+trendColor = [0.68 0.35 0.19];
+[fig, axesHandles] = createManuscriptFigureCanvas('timeSeries');
+
+ax1 = axesHandles(1);
+applyManuscriptAxesStyle(ax1);
+hold(ax1, 'on');
+plot(ax1, dateObjects, department.labFlipPerOperatorTurnoverPercent, 'o-', ...
+    'Color', observedColor, 'MarkerFaceColor', observedColor, ...
+    'MarkerSize', 4.5, 'LineWidth', 1.15);
+plotManuscriptTemporalTrend(ax1, dateObjects, trends.departmentFlipRatioPercent, ...
+    trendColor, timeBin, 'percentage points');
+ylabel(ax1, 'Lab flips per operator turnover (%)');
+addPanelLabel(ax1, 'A');
+formatManuscriptTimeAxis(ax1, timeSeries);
+hold(ax1, 'off');
+
+ax2 = axesHandles(2);
+applyManuscriptAxesStyle(ax2);
+hold(ax2, 'on');
+plot(ax2, dateObjects, department.operatorIdlePerOperatorTurnover, 'o-', ...
+    'Color', observedColor, 'MarkerFaceColor', observedColor, ...
+    'MarkerSize', 4.5, 'LineWidth', 1.15);
+plotManuscriptTemporalTrend(ax2, dateObjects, trends.departmentOperatorIdlePerTurnover, ...
+    trendColor, timeBin, 'min/turnover');
+ylabel(ax2, 'Operator idle time per turnover (min)');
+addPanelLabel(ax2, 'B');
+formatManuscriptTimeAxis(ax2, timeSeries);
+hold(ax2, 'off');
+linkaxes([ax1 ax2], 'x');
 end
 
-dailyEff = analysisResults.scheduleAnalysis.dailyEfficiency.byDate;
-for i = 1:length(analyzedDates)
-    dateStr = analyzedDates{i};
-    if isKey(dailyEff, dateStr)
-        d = dailyEff(dateStr);
-        if isfield(d, 'overallDeptLabFlipPerOperatorTurnoverDaily')
-            deptFlipPerOperatorTurnover(i) = d.overallDeptLabFlipPerOperatorTurnoverDaily * 100;
-        elseif isfield(d, 'overallDeptFlipToTurnoverRatioDaily')
-            deptFlipPerOperatorTurnover(i) = d.overallDeptFlipToTurnoverRatioDaily * 100;
-        end
-    end
-end
-end
+function fig = createManuscriptAssociationFigure(timeSeries, operatorAssociation, showOperatorInitialLabels, timeBin)
+xValues = timeSeries.department.labFlipPerOperatorTurnoverPercent;
+yValues = timeSeries.department.operatorIdlePerOperatorTurnover;
+[fig, axesHandles] = createManuscriptFigureCanvas('association');
+plotManuscriptScatterAxes(axesHandles(1), xValues, yValues, ...
+    timeSeries.relationships.departmentFlipVsIdle, timeSeries.binLabels, true, [], ...
+    'Lab flips per operator turnover (%)', 'Operator idle time per turnover (min)');
+title(axesHandles(1), 'Department-Level Temporal Association');
+addPanelLabel(axesHandles(1), 'A');
+addManuscriptContextAnnotation(axesHandles(1), sprintf('Each point represents one %s.', timeBin));
 
-function [dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorNames] = buildOperatorIdleSeries(analysisResults, numDates)
-dailyMedianIdlePerTurnover = NaN(numDates, 1);
-dailyOperatorIdlePerTurnoverMatrix = [];
-operatorNames = {};
-
-if ~isfield(analysisResults, 'operatorAnalysis') || ...
-   ~isfield(analysisResults.operatorAnalysis, 'caseStats') || ...
-   ~isfield(analysisResults.operatorAnalysis, 'idleTimeStats')
-    warning('Operator daily idle statistics not available for idle-time trend plot.');
-    return;
+labels = {};
+if showOperatorInitialLabels
+    labels = createOperatorInitialLabels(operatorAssociation.operatorNames);
+end
+plotManuscriptScatterAxes(axesHandles(2), operatorAssociation.pooledFlipRatioPercent, ...
+    operatorAssociation.medianIdleTimePerTurnover, operatorAssociation.relationship, ...
+    labels, showOperatorInitialLabels, operatorAssociation.totalOperatorTurnovers, ...
+    'Pooled lab flips per operator turnover (%)', 'Median operator idle time per turnover (min)');
+title(axesHandles(2), 'Operator-Level Association');
+addPanelLabel(axesHandles(2), 'B');
 end
 
-caseStats = analysisResults.operatorAnalysis.caseStats;
-idleTimeStats = analysisResults.operatorAnalysis.idleTimeStats;
-operatorNames = keys(caseStats);
-numOperators = length(operatorNames);
-dailyOperatorIdlePerTurnoverMatrix = NaN(numOperators, numDates);
-
-for dateIdx = 1:numDates
-    dailyIdlePerTurnover = [];
-    for opIdx = 1:length(operatorNames)
-        opName = operatorNames{opIdx};
-        caseArray = caseStats(opName);
-        idleArray = idleTimeStats(opName);
-        if dateIdx <= length(caseArray) && dateIdx <= length(idleArray)
-            casesThisDay = caseArray(dateIdx);
-            idleThisDay = idleArray(dateIdx);
-            if ~isnan(casesThisDay) && casesThisDay > 1 && ~isnan(idleThisDay)
-                turnovers = casesThisDay - 1;
-                if turnovers > 0
-                    operatorIdlePerTurnover = idleThisDay / turnovers;
-                    dailyOperatorIdlePerTurnoverMatrix(opIdx, dateIdx) = operatorIdlePerTurnover;
-                    dailyIdlePerTurnover(end+1) = operatorIdlePerTurnover; %#ok<AGROW>
-                end
-            end
-        end
-    end
-
-    if ~isempty(dailyIdlePerTurnover)
-        dailyMedianIdlePerTurnover(dateIdx) = median(dailyIdlePerTurnover, 'omitnan');
-    end
-end
+function plotManuscriptScatterAxes(ax, xValues, yValues, relationship, labels, showLabels, pointWeights, xLabelText, yLabelText)
+validValues = isfinite(xValues) & isfinite(yValues);
+if ~any(validValues)
+    error('No valid data available for manuscript association figure.');
 end
 
-function createIndividualOperatorTracesFigure(dateObjects, flipRatioMatrix, operatorLabels)
+observedColor = [0.08 0.20 0.38];
+trendColor = [0.68 0.35 0.19];
+applyManuscriptAxesStyle(ax);
+hold(ax, 'on');
+plottedX = xValues(validValues);
+plottedY = yValues(validValues);
+if isempty(pointWeights)
+    markerSizes = repmat(46, sum(validValues), 1);
+else
+    plottedWeights = pointWeights(validValues);
+    markerSizes = scaleManuscriptMarkerSizes(plottedWeights);
+end
+scatter(ax, plottedX, plottedY, markerSizes, observedColor, 'filled', ...
+    'MarkerEdgeColor', 'w', 'LineWidth', 0.6);
+
+if sum(validValues) >= 2 && isfinite(relationship.slope)
+    sortedX = sort(plottedX);
+    fittedY = relationship.intercept + relationship.slope .* sortedX;
+    plot(ax, sortedX, fittedY, '--', 'Color', trendColor, 'LineWidth', 1.35);
+    annotationText = sprintf('Slope: %.2f min per 1%% flip ratio\nR^2 = %.2f', ...
+        relationship.slope, relationship.rSquared);
+    addManuscriptStatsAnnotation(ax, annotationText);
+end
+if showLabels
+    addManuscriptPointLabels(ax, plottedX, plottedY, labels(validValues));
+end
+if ~isempty(pointWeights)
+    addTurnoverOpportunityCaption(ax, pointWeights(validValues));
+end
+xlabel(ax, xLabelText);
+ylabel(ax, yLabelText);
+hold(ax, 'off');
+end
+
+function createIndividualOperatorTracesFigure(dateObjects, flipRatioMatrix, operatorLabels, pooledFlipRatio, trendStats, timeBin)
 avgLineColor = [0.00 0.45 0.74];
 trendLineColor = [0.85 0.33 0.10];
-traceColor = [0.70 0.70 0.70];
+operatorTraceColors = lines(max(1, size(flipRatioMatrix, 1)));
 
 fig = figure('Position', [350, 350, 1500, 700], 'Color', 'w', 'InvertHardcopy', 'off');
 ax = axes('Parent', fig);
@@ -919,51 +1033,50 @@ applyReadableTimeSeriesAxesStyle(ax);
 hold(ax, 'on');
 
 numOperators = size(flipRatioMatrix, 1);
+legendHandles = gobjects(0);
+legendLabels = {};
 for opIdx = 1:numOperators
     validData = ~isnan(flipRatioMatrix(opIdx, :));
     if any(validData)
-        plot(ax, dateObjects(validData), flipRatioMatrix(opIdx, validData), 'o', ...
-            'Color', traceColor, 'MarkerSize', 3, 'HandleVisibility', 'off');
+        traceHandle = plot(ax, dateObjects, flipRatioMatrix(opIdx, :), 'o-', ...
+            'Color', operatorTraceColors(opIdx, :), 'MarkerSize', 3, ...
+            'LineWidth', 0.8, 'DisplayName', operatorLabels{opIdx});
+        legendHandles(end+1) = traceHandle; %#ok<AGROW>
+        legendLabels{end+1} = operatorLabels{opIdx}; %#ok<AGROW>
     end
 end
 
-avgOperatorFlipRatio = nanmean(flipRatioMatrix, 1);
-validAvgData = ~isnan(avgOperatorFlipRatio);
+validAvgData = ~isnan(pooledFlipRatio);
 if any(validAvgData)
-    plot(ax, dateObjects, avgOperatorFlipRatio, 'o-', ...
+    cohortHandle = plot(ax, dateObjects, pooledFlipRatio, 'o-', ...
         'Color', avgLineColor, 'LineWidth', 2.5, 'MarkerSize', 5, ...
-        'MarkerFaceColor', avgLineColor, 'DisplayName', 'Average Operator Flip Ratio');
-    if sum(validAvgData) > 2
-        validDates = dateObjects(validAvgData);
-        validValues = avgOperatorFlipRatio(validAvgData);
-        dateNums = datenum(validDates);
-        p = polyfit(dateNums, validValues, 1);
-        trendLine = polyval(p, dateNums);
-        plot(ax, validDates, trendLine, '-', 'Color', trendLineColor, ...
-            'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
-        trendStats = calculateLinearTrendStats(dateNums, validValues);
-        trendStats.slope = trendStats.slope * 30;
-        addTrendStatsAnnotation(ax, trendStats, '/month');
+        'MarkerFaceColor', avgLineColor, 'DisplayName', 'Included-Operator Cohort Ratio');
+    legendHandles(end+1) = cohortHandle; %#ok<AGROW>
+    legendLabels{end+1} = 'Included-Operator Cohort Ratio'; %#ok<AGROW>
+    trendHandle = plotStoredTrend(ax, dateObjects, trendStats, trendLineColor, timeBin, '%');
+    if ~isempty(trendHandle)
+        legendHandles(end+1) = trendHandle; %#ok<AGROW>
+        legendLabels{end+1} = 'Linear Trend'; %#ok<AGROW>
     end
 end
 
-title(ax, 'Individual Operator Lab Flips per Operator Turnover Over Time');
+title(ax, sprintf('Individual Operator Lab Flips per Operator Turnover by %s', capitalizeBinName(timeBin)));
 xlabel(ax, 'Date');
 ylabel(ax, 'Lab Flips per Operator Turnover (%)');
 ylim(ax, [0 100]);
-xlim(ax, [min(dateObjects) max(dateObjects)]);
+setTimeSeriesXLimits(ax, dateObjects);
 set(get(ax, 'Title'), 'Color', [0.10 0.10 0.10]);
 set(get(ax, 'XLabel'), 'Color', [0.10 0.10 0.10]);
 set(get(ax, 'YLabel'), 'Color', [0.10 0.10 0.10]);
-leg = legend(ax, 'Location', 'northwest', 'FontSize', 9, 'Box', 'off');
+leg = legend(ax, legendHandles, legendLabels, 'Location', 'eastoutside', 'FontSize', 8, 'Box', 'off');
 set(leg, 'TextColor', [0.10 0.10 0.10], 'Color', 'w');
-text(ax, 0.995, 0.03, 'Gray markers = individual operator-days', ...
+text(ax, 0.995, 0.03, 'Colored lines = individual operators; gaps = no turnover opportunity', ...
     'Units', 'normalized', 'HorizontalAlignment', 'right', ...
     'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
 hold(ax, 'off');
 end
 
-function createFlipRatioSummaryFigure(dateObjects, avgOperatorFlipRatio, deptFlipPerOperatorTurnover)
+function createFlipRatioSummaryFigure(dateObjects, cohortFlipRatio, deptFlipPerOperatorTurnover, trends, timeBin)
 avgLineColor = [0.00 0.45 0.74];
 deptLineColor = [0.10 0.55 0.35];
 trendLineColor = [0.85 0.33 0.10];
@@ -973,29 +1086,19 @@ fig = figure('Position', [400, 400, 1400, 850], 'Color', 'w', 'InvertHardcopy', 
 ax1 = subplot(2, 1, 1, 'Parent', fig);
 applyReadableTimeSeriesAxesStyle(ax1);
 hold(ax1, 'on');
-validAvgData = ~isnan(avgOperatorFlipRatio);
+validAvgData = ~isnan(cohortFlipRatio);
 if any(validAvgData)
-    plot(ax1, dateObjects, avgOperatorFlipRatio, 'o-', ...
+    plot(ax1, dateObjects, cohortFlipRatio, 'o-', ...
          'Color', avgLineColor, 'LineWidth', 0.5, 'MarkerSize', 2.5, ...
-         'MarkerFaceColor', avgLineColor, 'DisplayName', 'Average Operator Flip Ratio');
-    if sum(validAvgData) > 2
-        validDates = dateObjects(validAvgData);
-        validValues = avgOperatorFlipRatio(validAvgData);
-        dateNums = datenum(validDates);
-        p = polyfit(dateNums, validValues, 1);
-        trendLine = polyval(p, dateNums);
-        plot(ax1, validDates, trendLine, '-', 'Color', trendLineColor, ...
-            'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
-        trendStats = calculateLinearTrendStats(dateNums, validValues);
-        trendStats.slope = trendStats.slope * 30;
-        addTrendStatsAnnotation(ax1, trendStats, '/month');
-    end
+         'MarkerFaceColor', avgLineColor, 'DisplayName', 'Included-Operator Cohort Ratio');
+    plotStoredTrend(ax1, dateObjects, trends.includedOperatorFlipRatioPercent, ...
+        trendLineColor, timeBin, '%');
 end
-title(ax1, 'Average Operator Lab Flips per Operator Turnover Over Time');
+title(ax1, sprintf('Included-Operator Cohort Lab Flips per Operator Turnover by %s', capitalizeBinName(timeBin)));
 xlabel(ax1, 'Date');
 ylabel(ax1, 'Lab Flips per Operator Turnover (%)');
 ylim(ax1, [0 100]);
-xlim(ax1, [min(dateObjects) max(dateObjects)]);
+setTimeSeriesXLimits(ax1, dateObjects);
 set(get(ax1, 'Title'), 'Color', [0.10 0.10 0.10]);
 set(get(ax1, 'XLabel'), 'Color', [0.10 0.10 0.10]);
 set(get(ax1, 'YLabel'), 'Color', [0.10 0.10 0.10]);
@@ -1011,25 +1114,15 @@ validDeptData = ~isnan(deptFlipPerOperatorTurnover);
 if any(validDeptData)
     plot(ax2, dateObjects, deptFlipPerOperatorTurnover, 'o-', ...
          'Color', deptLineColor, 'LineWidth', 0.5, 'MarkerSize', 2, ...
-         'MarkerFaceColor', deptLineColor, 'DisplayName', 'Department Daily Ratio');
-    if sum(validDeptData) > 2
-        validDates = dateObjects(validDeptData);
-        validValues = deptFlipPerOperatorTurnover(validDeptData);
-        dateNums = datenum(validDates);
-        p = polyfit(dateNums, validValues, 1);
-        trendLine = polyval(p, dateNums);
-        plot(ax2, validDates, trendLine, '-', 'Color', trendLineColor, ...
-            'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
-        trendStats = calculateLinearTrendStats(dateNums, validValues);
-        trendStats.slope = trendStats.slope * 30;
-        addTrendStatsAnnotation(ax2, trendStats, '/month');
-    end
+         'MarkerFaceColor', deptLineColor, 'DisplayName', 'Department Ratio');
+    plotStoredTrend(ax2, dateObjects, trends.departmentFlipRatioPercent, ...
+        trendLineColor, timeBin, '%');
 end
-title(ax2, 'Department Lab Flips per Operator Turnover Over Time');
+title(ax2, sprintf('Department Lab Flips per Operator Turnover by %s', capitalizeBinName(timeBin)));
 xlabel(ax2, 'Date');
 ylabel(ax2, 'Lab Flips per Operator Turnover (%)');
 ylim(ax2, [0 100]);
-xlim(ax2, [min(dateObjects) max(dateObjects)]);
+setTimeSeriesXLimits(ax2, dateObjects);
 set(get(ax2, 'Title'), 'Color', [0.10 0.10 0.10]);
 set(get(ax2, 'XLabel'), 'Color', [0.10 0.10 0.10]);
 set(get(ax2, 'YLabel'), 'Color', [0.10 0.10 0.10]);
@@ -1039,10 +1132,10 @@ grid off;
 hold(ax2, 'off');
 end
 
-function createOperatorIdleTimeTrendFigure(dateObjects, dailyMedianIdlePerTurnover, dailyOperatorIdlePerTurnoverMatrix, operatorLabels, showIndividualOperatorTraces)
+function createOperatorIdleTimeTrendFigure(dateObjects, medianIdlePerTurnover, operatorIdlePerTurnoverMatrix, operatorLabels, showIndividualOperatorTraces, trendStats, timeBin)
 medianColor = [0.00 0.45 0.74];
 trendLineColor = [0.85 0.33 0.10];
-operatorTraceColors = lines(max(1, size(dailyOperatorIdlePerTurnoverMatrix, 1)));
+operatorTraceColors = lines(max(1, size(operatorIdlePerTurnoverMatrix, 1)));
 
 fig = figure('Position', [450, 450, 1400, 650], 'Color', 'w', 'InvertHardcopy', 'off');
 ax = axes('Parent', fig);
@@ -1052,13 +1145,14 @@ hold(ax, 'on');
 legendHandles = gobjects(0);
 legendLabels = {};
 
-if nargin >= 5 && showIndividualOperatorTraces && ~isempty(dailyOperatorIdlePerTurnoverMatrix)
-    numOperators = size(dailyOperatorIdlePerTurnoverMatrix, 1);
+if showIndividualOperatorTraces && ~isempty(operatorIdlePerTurnoverMatrix)
+    numOperators = size(operatorIdlePerTurnoverMatrix, 1);
     for opIdx = 1:numOperators
-        validData = ~isnan(dailyOperatorIdlePerTurnoverMatrix(opIdx, :));
+        validData = ~isnan(operatorIdlePerTurnoverMatrix(opIdx, :));
         if any(validData)
-            plotHandle = plot(ax, dateObjects(validData), dailyOperatorIdlePerTurnoverMatrix(opIdx, validData), 'o', ...
+            plotHandle = plot(ax, dateObjects, operatorIdlePerTurnoverMatrix(opIdx, :), 'o-', ...
                 'Color', operatorTraceColors(opIdx, :), 'MarkerSize', 2.5, ...
+                'LineWidth', 0.8, ...
                 'DisplayName', operatorLabels{opIdx});
             legendHandles(end+1) = plotHandle; %#ok<AGROW>
             legendLabels{end+1} = operatorLabels{opIdx}; %#ok<AGROW>
@@ -1066,37 +1160,28 @@ if nargin >= 5 && showIndividualOperatorTraces && ~isempty(dailyOperatorIdlePerT
     end
 end
 
-validMedian = ~isnan(dailyMedianIdlePerTurnover);
+validMedian = ~isnan(medianIdlePerTurnover);
 if any(validMedian)
-    medianHandle = plot(ax, dateObjects, dailyMedianIdlePerTurnover, 'o-', ...
+    medianHandle = plot(ax, dateObjects, medianIdlePerTurnover, 'o-', ...
         'Color', medianColor, 'LineWidth', 0.5, 'MarkerSize', 2.5, ...
         'MarkerFaceColor', medianColor, 'DisplayName', 'Median Operator Idle/Turnover');
     legendHandles(end+1) = medianHandle; %#ok<AGROW>
     legendLabels{end+1} = 'Median Operator Idle/Turnover'; %#ok<AGROW>
-    if sum(validMedian) > 2
-        validDates = dateObjects(validMedian);
-        validValues = dailyMedianIdlePerTurnover(validMedian);
-        dateNums = datenum(validDates);
-        p = polyfit(dateNums, validValues, 1);
-        trendLine = polyval(p, dateNums);
-        trendHandle = plot(ax, validDates, trendLine, '-', 'Color', trendLineColor, ...
-            'LineWidth', 2.2, 'DisplayName', 'Linear Trend');
+    trendHandle = plotStoredTrend(ax, dateObjects, trendStats, trendLineColor, timeBin, ' minutes');
+    if ~isempty(trendHandle)
         legendHandles(end+1) = trendHandle; %#ok<AGROW>
         legendLabels{end+1} = 'Linear Trend'; %#ok<AGROW>
-        trendStats = calculateLinearTrendStats(dateNums, validValues);
-        trendStats.slope = trendStats.slope * 30;
-        addTrendStatsAnnotation(ax, trendStats, '/month');
     end
 end
 
-title(ax, 'Operator Idle Time per Turnover Over Time');
+title(ax, sprintf('Median Operator Idle Time per Turnover by %s', capitalizeBinName(timeBin)));
 xlabel(ax, 'Date');
 ylabel(ax, 'Idle Time per Turnover (minutes)');
-xlim(ax, [min(dateObjects) max(dateObjects)]);
+setTimeSeriesXLimits(ax, dateObjects);
 set(get(ax, 'Title'), 'Color', [0.10 0.10 0.10]);
 set(get(ax, 'XLabel'), 'Color', [0.10 0.10 0.10]);
 set(get(ax, 'YLabel'), 'Color', [0.10 0.10 0.10]);
-if nargin >= 5 && showIndividualOperatorTraces
+if showIndividualOperatorTraces
     if ~isempty(legendHandles)
         leg = legend(ax, legendHandles, legendLabels, 'Location', 'eastoutside', 'FontSize', 8, 'Box', 'off');
     else
@@ -1106,17 +1191,279 @@ else
     leg = legend(ax, 'Location', 'northwest', 'FontSize', 9, 'Box', 'off');
 end
 set(leg, 'TextColor', [0.10 0.10 0.10], 'Color', 'w');
-if nargin >= 5 && showIndividualOperatorTraces
-    text(ax, 0.995, 0.03, 'Colored markers = individual operator-days; median = typical operator-day; line = linear trend', ...
+if showIndividualOperatorTraces
+    text(ax, 0.995, 0.03, 'Colored lines = individual operators; gaps = no turnover opportunity; median = typical operator-bin', ...
         'Units', 'normalized', 'HorizontalAlignment', 'right', ...
         'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
 else
-    text(ax, 0.995, 0.03, 'Median = typical operator-day; line = linear trend', ...
+    text(ax, 0.995, 0.03, 'Median = typical operator-bin; line = linear trend', ...
         'Units', 'normalized', 'HorizontalAlignment', 'right', ...
         'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
 end
 grid off;
 hold(ax, 'off');
+end
+
+function trendHandle = plotStoredTrend(ax, dateObjects, trendStats, trendLineColor, timeBin, slopePrefix)
+trendHandle = [];
+if ~isfield(trendStats, 'fittedValues') || sum(isfinite(trendStats.fittedValues)) < 2
+    return;
+end
+trendHandle = plot(ax, dateObjects, trendStats.fittedValues, '-', 'Color', trendLineColor, ...
+    'LineWidth', 2.5, 'DisplayName', 'Linear Trend');
+displayStats = struct('slope', trendStats.slopePerBin, 'rSquared', trendStats.rSquared);
+addTrendStatsAnnotation(ax, displayStats, sprintf('%s/%s', slopePrefix, timeBin));
+end
+
+function label = capitalizeBinName(timeBin)
+label = [upper(timeBin(1)) timeBin(2:end)];
+end
+
+function isValid = isValidTimeBinInput(timeBin)
+isValid = (ischar(timeBin) || (isstring(timeBin) && isscalar(timeBin))) && ...
+    any(strcmpi(char(string(timeBin)), {'day', 'week', 'month', 'quarter', 'year'}));
+end
+
+function isValid = isValidExportFormatInput(exportFormat)
+isValid = (ischar(exportFormat) || (isstring(exportFormat) && isscalar(exportFormat))) && ...
+    any(strcmpi(char(string(exportFormat)), {'pdf', 'tiff'}));
+end
+
+function setTimeSeriesXLimits(ax, dateObjects)
+if length(dateObjects) == 1
+    xlim(ax, [dateObjects(1) - days(1), dateObjects(1) + days(1)]);
+else
+    xlim(ax, [min(dateObjects), max(dateObjects)]);
+end
+end
+
+function plotManuscriptTemporalTrend(ax, dateObjects, trendStats, trendColor, timeBin, slopeUnits)
+if ~isfield(trendStats, 'fittedValues') || sum(isfinite(trendStats.fittedValues)) < 2
+    return;
+end
+plot(ax, dateObjects, trendStats.fittedValues, '--', 'Color', trendColor, 'LineWidth', 1.35);
+annotationText = sprintf('Trend: %+.2f %s/%s\nR^2 = %.2f', ...
+    trendStats.slopePerBin, slopeUnits, timeBin, trendStats.rSquared);
+addManuscriptStatsAnnotation(ax, annotationText);
+end
+
+function addManuscriptStatsAnnotation(ax, annotationText)
+fig = ancestor(ax, 'figure');
+axPosition = getpixelposition(ax, true);
+offset = scaleManuscriptPixels([20, 52, 170, 48]);
+annotation(fig, 'textbox', 'Units', 'pixels', ...
+    'Position', [axPosition(1) + axPosition(3) + offset(1), ...
+    axPosition(2) + axPosition(4) - offset(2), offset(3), offset(4)], ...
+    'String', annotationText, 'HorizontalAlignment', 'left', ...
+    'VerticalAlignment', 'top', 'FontName', 'Arial', 'FontSize', 9, ...
+    'Color', [0.15 0.15 0.15], 'EdgeColor', 'none', ...
+    'BackgroundColor', 'none', 'FitBoxToText', 'off');
+end
+
+function addPanelLabel(ax, panelLabel)
+text(ax, -0.075, 1.03, panelLabel, 'Units', 'normalized', ...
+    'FontSize', 12, 'FontWeight', 'bold', 'Color', [0.10 0.10 0.10], ...
+    'HorizontalAlignment', 'left', 'VerticalAlignment', 'bottom');
+end
+
+function addManuscriptPointLabels(ax, xValues, yValues, labels)
+xSpan = max(range(xValues), 1);
+ySpan = max(range(yValues), 1);
+candidateOffsets = [ ...
+     0.02,  0.035; ...
+     0.02, -0.045; ...
+     0.11,  0.000; ...
+    -0.04,  0.035; ...
+    -0.04, -0.045; ...
+     0.11,  0.055; ...
+     0.11, -0.060; ...
+    -0.04,  0.075];
+labelX = NaN(length(labels), 1);
+labelY = NaN(length(labels), 1);
+
+for pointIdx = 1:length(labels)
+    selectedOffset = candidateOffsets(1, :);
+    for candidateIdx = 1:size(candidateOffsets, 1)
+        candidateOffset = candidateOffsets(candidateIdx, :);
+        proposedX = xValues(pointIdx) + candidateOffset(1) * xSpan;
+        proposedY = yValues(pointIdx) + candidateOffset(2) * ySpan;
+        if pointIdx == 1 || ~any(abs(proposedX - labelX(1:pointIdx-1)) < 0.13 * xSpan & ...
+                abs(proposedY - labelY(1:pointIdx-1)) < 0.06 * ySpan)
+            selectedOffset = candidateOffset;
+            break;
+        end
+    end
+    labelX(pointIdx) = xValues(pointIdx) + selectedOffset(1) * xSpan;
+    labelY(pointIdx) = yValues(pointIdx) + selectedOffset(2) * ySpan;
+    if selectedOffset(1) < 0
+        horizontalAlignment = 'right';
+    else
+        horizontalAlignment = 'left';
+    end
+    text(ax, labelX(pointIdx), labelY(pointIdx), labels{pointIdx}, ...
+        'FontSize', 8, 'Color', [0.20 0.20 0.20], ...
+        'HorizontalAlignment', horizontalAlignment, ...
+        'BackgroundColor', 'w', 'Margin', 1);
+end
+end
+
+function markerSizes = scaleManuscriptMarkerSizes(pointWeights)
+pointWeights = pointWeights(:);
+if range(pointWeights) == 0
+    markerSizes = repmat(62, size(pointWeights));
+    return;
+end
+normalizedWeights = (sqrt(pointWeights) - min(sqrt(pointWeights))) ./ range(sqrt(pointWeights));
+markerSizes = 38 + normalizedWeights * 82;
+end
+
+function addTurnoverOpportunityCaption(ax, pointWeights)
+noteText = sprintf(['Each point represents one operator.\n' ...
+    'Point area scales with turnover opportunities\n' ...
+    '(square-root scaled; range: %d--%d).'], ...
+    round(min(pointWeights)), round(max(pointWeights)));
+addManuscriptContextAnnotation(ax, noteText);
+end
+
+function addManuscriptContextAnnotation(ax, noteText)
+fig = ancestor(ax, 'figure');
+axPosition = getpixelposition(ax, true);
+offset = scaleManuscriptPixels([20, 155, 190, 72]);
+annotation(fig, 'textbox', 'Units', 'pixels', ...
+    'Position', [axPosition(1) + axPosition(3) + offset(1), ...
+    axPosition(2) + axPosition(4) - offset(2), offset(3), offset(4)], ...
+    'String', noteText, 'HorizontalAlignment', 'left', ...
+    'VerticalAlignment', 'top', 'FontName', 'Arial', 'FontSize', 8, ...
+    'Color', [0.25 0.25 0.25], 'EdgeColor', 'none', ...
+    'BackgroundColor', 'none', 'FitBoxToText', 'off');
+end
+
+function trendStats = calculateDisplayTrendStats(values)
+values = values(:);
+xValues = (0:length(values)-1)';
+validValues = isfinite(values);
+trendStats = struct('slopePerBin', NaN, 'rSquared', NaN, ...
+    'fittedValues', NaN(size(values)), 'nBins', sum(validValues));
+if sum(validValues) < 2
+    return;
+end
+if exist('fitlm', 'file') == 2
+    model = fitlm(xValues(validValues), values(validValues));
+    trendStats.slopePerBin = model.Coefficients.Estimate(2);
+    trendStats.rSquared = model.Rsquared.Ordinary;
+    trendStats.fittedValues = predict(model, xValues);
+else
+    coefficients = polyfit(xValues(validValues), values(validValues), 1);
+    trendStats.slopePerBin = coefficients(1);
+    trendStats.fittedValues = polyval(coefficients, xValues);
+    trendStats.rSquared = calculateFallbackRSquared(values(validValues), trendStats.fittedValues(validValues));
+end
+end
+
+function relationshipStats = calculateDisplayRelationshipStats(xValues, yValues)
+xValues = xValues(:);
+yValues = yValues(:);
+validValues = isfinite(xValues) & isfinite(yValues);
+relationshipStats = struct('slope', NaN, 'intercept', NaN, 'rSquared', NaN, ...
+    'fittedValues', NaN(size(yValues)), 'nBins', sum(validValues));
+if sum(validValues) < 2 || length(unique(xValues(validValues))) < 2
+    return;
+end
+if exist('fitlm', 'file') == 2
+    model = fitlm(xValues(validValues), yValues(validValues));
+    relationshipStats.intercept = model.Coefficients.Estimate(1);
+    relationshipStats.slope = model.Coefficients.Estimate(2);
+    relationshipStats.rSquared = model.Rsquared.Ordinary;
+    relationshipStats.fittedValues(validValues) = predict(model, xValues(validValues));
+else
+    coefficients = polyfit(xValues(validValues), yValues(validValues), 1);
+    relationshipStats.slope = coefficients(1);
+    relationshipStats.intercept = coefficients(2);
+    relationshipStats.fittedValues(validValues) = polyval(coefficients, xValues(validValues));
+    relationshipStats.rSquared = calculateFallbackRSquared(yValues(validValues), relationshipStats.fittedValues(validValues));
+end
+end
+
+function formatManuscriptTimeAxis(ax, timeSeries)
+dateObjects = timeSeries.binStartDates;
+setTimeSeriesXLimits(ax, dateObjects);
+numBins = length(dateObjects);
+if numBins <= 12
+    tickIdx = 1:numBins;
+else
+    tickIdx = unique(round(linspace(1, numBins, 10)));
+end
+xticks(ax, dateObjects(tickIdx));
+xticklabels(ax, timeSeries.binLabels(tickIdx));
+xtickangle(ax, 35);
+end
+
+function [fig, axesHandles] = createManuscriptFigureCanvas(figureType)
+axisSize = scaleManuscriptPixels(400);
+axisLeft = scaleManuscriptPixels(92);
+statsWidth = scaleManuscriptPixels(190);
+figureWidth = axisLeft + axisSize + statsWidth + scaleManuscriptPixels(18);
+switch figureType
+    case 'timeSeries'
+        figureHeight = scaleManuscriptPixels(1050);
+        axisPositions = [axisLeft, scaleManuscriptPixels(590), axisSize, axisSize; ...
+            axisLeft, scaleManuscriptPixels(64), axisSize, axisSize];
+        figurePosition = [300, 40, figureWidth, figureHeight];
+    case 'association'
+        figureHeight = scaleManuscriptPixels(1050);
+        axisPositions = [axisLeft, scaleManuscriptPixels(590), axisSize, axisSize; ...
+            axisLeft, scaleManuscriptPixels(64), axisSize, axisSize];
+        figurePosition = [350, 40, figureWidth, figureHeight];
+    otherwise
+        error('Unsupported manuscript figure type: %s', figureType);
+end
+fig = figure('Units', 'pixels', 'Position', figurePosition, ...
+    'Color', 'w', 'InvertHardcopy', 'off');
+axesHandles = gobjects(size(axisPositions, 1), 1);
+for axisIdx = 1:size(axisPositions, 1)
+    axesHandles(axisIdx) = axes('Parent', fig, 'Units', 'pixels', ...
+        'Position', axisPositions(axisIdx, :));
+end
+end
+
+function scaledPixels = scaleManuscriptPixels(pixelValues)
+scaledPixels = round(pixelValues * 0.85);
+end
+
+function applyManuscriptAxesStyle(ax)
+fig = ancestor(ax, 'figure');
+set(fig, 'Color', 'w', 'InvertHardcopy', 'off');
+set(ax, 'Box', 'off', 'Color', 'w', 'FontName', 'Arial', 'FontSize', 10, ...
+    'LineWidth', 0.85, 'TickDir', 'out', ...
+    'XColor', [0.12 0.12 0.12], 'YColor', [0.12 0.12 0.12], ...
+      'YGrid', 'on', 'XGrid', 'off', 'GridColor', [0.90 0.90 0.90], ...
+      'GridAlpha', 1.0, 'MinorGridLineStyle', 'none');
+pbaspect(ax, [1 1 1]);
+ax.Layer = 'top';
+end
+
+function exportManuscriptFigure(fig, exportPath, figureSuffix, exportFormat, exportResolution)
+if isempty(exportPath)
+    return;
+end
+[exportFolder, exportName, ~] = fileparts(exportPath);
+if isempty(exportName)
+    error('ExportPath must provide a manuscript filename prefix.');
+end
+if isempty(exportFolder)
+    exportFolder = '.';
+end
+if ~exist(exportFolder, 'dir')
+    error('ExportPath folder does not exist: %s', exportFolder);
+end
+outputFile = fullfile(exportFolder, sprintf('%s_%s.%s', exportName, figureSuffix, exportFormat));
+switch exportFormat
+    case 'pdf'
+        exportgraphics(fig, outputFile, 'ContentType', 'vector');
+    case 'tiff'
+        exportgraphics(fig, outputFile, 'Resolution', exportResolution);
+end
+fprintf('Exported manuscript figure: %s\n', outputFile);
 end
 
 function applyReadableTimeSeriesAxesStyle(ax)

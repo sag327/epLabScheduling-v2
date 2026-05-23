@@ -50,6 +50,24 @@ matlab -batch "run('scripts/test_experiments.m')"
 matlab -batch "addpath('scripts'); config=configureExperiment(); results=runSchedulingExperiment(config,'SaveResults',false);"
 ```
 
+## Manuscript LaTeX Convention
+
+When creating standalone `.tex` manuscript files, include a complete document preamble and the full `document` environment, including both `\begin{document}` and `\end{document}`. Use this default header unless the user specifies a journal template:
+
+```latex
+\documentclass[12pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{lscape}
+
+\begin{document}
+
+% Manuscript content here
+
+\end{document}
+```
+
 ## Project Status
 
 ✅ **Performance Optimizations Complete:**
@@ -111,7 +129,35 @@ analysisResultsWeekdays = analyzeHistoricalData(historicalData, ...
     'HistoricalSchedules', historicalSchedules, ...
     'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
     'WeekdaysOnly', true);
+
+% Optional: remove selected operators from operator-level summaries/plots only.
+% Department metrics still include all cases in the date/weekday cohort.
+analysisResultsFiltered = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'ExcludeOperators', {'OPERATOR, NAME'});
+
+% Optional: remove low-volume operators from operator-level summaries/plots only.
+analysisResultsMinVolume = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'MinOperatorTotalCases', 10);
+
+% Parsed analysis options are stored for logging/reproducibility.
+disp(analysisResultsFiltered.inputOptions);
+
+% Stored department operational trends (day/week/month/quarter/year available)
+quarterly = analysisResults.timeSeriesAnalysis.quarter.department;
+disp(quarterly.volume.totalProcedures);
+disp(quarterly.duration.medianProcedureDurationMinutes);
+disp(quarterly.throughput.proceduresPerDepartmentOperatingHour);
+disp(quarterly.throughput.proceduresPerActiveLabHour);
+disp(quarterly.bottleneck);
 ```
+
+`quarterly.bottleneck.totalObservedSameLabInterCaseMinutes` is the observed
+wheels-out to next wheels-in gap between consecutive cases in one lab when
+both adjacent room-boundary component times are valid. It is not a separately
+measured breakdown of room cleaning work versus unused room capacity; do not
+report it as both turnover time and room idle time.
 
 ### Retrospective Visualization
 ```matlab

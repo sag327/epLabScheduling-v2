@@ -147,6 +147,8 @@ for i = 1:numValidCases
     historicalCases(i).setupTime = ensureValidTime(historicalData.setupTime(idx), 30);
     historicalCases(i).procTime = ensureValidTime(historicalData.procedureTime(idx), 120);
     historicalCases(i).postTime = ensureValidTime(historicalData.postTime(idx), 15);
+    historicalCases(i).hasObservedRoomEntryTime = isfinite(historicalData.setupTime(idx)) && historicalData.setupTime(idx) > 0;
+    historicalCases(i).hasObservedRoomExitTime = isfinite(historicalData.postTime(idx)) && historicalData.postTime(idx) > 0;
     
     % Extract actual start and end times from historical timestamps
     if ~ismissing(historicalData.procedureStartTimeOfDay(idx)) && ...
@@ -274,6 +276,8 @@ for i = 1:numValidCases
     scheduleCase.turnoverTime = appliedTurnoverTime;
     scheduleCase.fallbackTurnoverTime = turnoverTime;
     scheduleCase.usedFallbackTurnover = appliedTurnoverTime > 0;
+    scheduleCase.hasObservedRoomEntryTime = caseInfo.hasObservedRoomEntryTime;
+    scheduleCase.hasObservedRoomExitTime = caseInfo.hasObservedRoomExitTime;
     scheduleCase.observedRoomGapAfterCase = NaN;
     scheduleCase.nextCaseStartTime = NaN;
     
@@ -312,7 +316,12 @@ for j = 1:numLabs
                 nextStart = historicalSchedule.labs{j}(c+1).startTime;
                 currentEnd = historicalSchedule.labs{j}(c).endTime;
                 historicalSchedule.labs{j}(c).nextCaseStartTime = nextStart;
-                historicalSchedule.labs{j}(c).observedRoomGapAfterCase = max(0, nextStart - currentEnd);
+                if historicalSchedule.labs{j}(c).hasObservedRoomExitTime && ...
+                        historicalSchedule.labs{j}(c+1).hasObservedRoomEntryTime
+                    historicalSchedule.labs{j}(c).observedRoomGapAfterCase = max(0, nextStart - currentEnd);
+                else
+                    historicalSchedule.labs{j}(c).observedRoomGapAfterCase = NaN;
+                end
             else
                 historicalSchedule.labs{j}(c).nextCaseStartTime = NaN;
                 historicalSchedule.labs{j}(c).observedRoomGapAfterCase = NaN;

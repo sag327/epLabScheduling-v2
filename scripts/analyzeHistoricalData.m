@@ -22,6 +22,11 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %                          the inclusive date range (default: [], full history)
 %   'WeekdaysOnly'       - logical, include only Monday-Friday cases
 %                          (default: false)
+%   'ExcludeOperators'   - char/string/cellstr/string array of exact operator
+%                          names to remove from operator-level outputs only
+%                          (default: {}, show all operators)
+%   'MinOperatorTotalCases' - positive integer minimum total cases required
+%                             for operator-level outputs only (default: [])
 %
 % Examples:
 %   % Basic analysis (data only)
@@ -46,8 +51,17 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %                        'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
 %                        'WeekdaysOnly', true);
 %
+%   % Exclude selected operators from operator-level summaries and plots
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, ...
+%                        'ExcludeOperators', {'OPERATOR, NAME'});
+%
+%   % Exclude operators with fewer than 10 cases from operator-level outputs
+%   analyzeHistoricalData(historicalData, 'HistoricalSchedules', schedules, ...
+%                        'MinOperatorTotalCases', 10);
+%
 % Output:
 %   analysisResults - Structure containing comprehensive analysis results:
+%     .inputOptions           - Parsed analysis options and normalized filter metadata
 %     .datasetSummary         - Basic dataset statistics
 %     .procedureAnalysis      - Procedure type and duration statistics
 %     .surgeonAnalysis        - Surgeon workload and performance metrics
@@ -61,6 +75,9 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %     .scheduleAnalysis       - Schedule performance metrics (if schedules provided)
 %     .operatorAnalysis       - Operator workload and idle time (if schedules provided)
 %     .labFlipAnalysis        - Lab switching and flip statistics (if schedules provided)
+%     .timeSeriesAnalysis     - Stored day/week/month/quarter/year summaries
+%                               for retrospective trend visualization and
+%                               department operational decomposition
 %       - scheduleAnalysis.dailyEfficiency:
 %           .byDate(date) with department-wide daily metrics across all labs/operators:
 %               overallDeptTotalOperatorIdleTimeDaily, overallDeptMedianOperatorIdleTimeDaily,
@@ -69,6 +86,9 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %               overallDeptMakespanDaily, overallDeptTotalRoomBusyTimeDaily (setup+proc+post),
 %               overallDeptAvgConcurrentLabsDaily, overallDeptNumLabsActiveDaily,
 %               overallDeptOperatorsWithOutpatientDaily
+%               operationalMetrics with procedure volume/duration,
+%               throughput denominators, component times, and observed
+%               same-lab inter-case intervals
 %           .summary with means/stds and correlations:
 %               mean/std of idleToTurnover, flipToTurnover, avgConcurrentLabs; and
 %               corrIdle_vs_FlipTurnover, corrIdle_vs_AvgConcurrentLabs (pearson/spearman)
@@ -90,6 +110,8 @@ addParameter(p, 'SaveReport', false, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'ReportFile', 'historical_analysis_report.txt', @(x) ischar(x) || isstring(x));
 addParameter(p, 'DateRange', [], @isValidDateRangeInput);
 addParameter(p, 'WeekdaysOnly', false, @(x) islogical(x) && isscalar(x));
+addParameter(p, 'ExcludeOperators', {}, @isValidOperatorListInput);
+addParameter(p, 'MinOperatorTotalCases', [], @isValidMinOperatorTotalCases);
 
 % Parse the inputs
 parse(p, historicalData, varargin{:});
@@ -101,6 +123,8 @@ saveReport = p.Results.SaveReport;
 reportFile = char(p.Results.ReportFile);
 dateRange = p.Results.DateRange;
 weekdaysOnly = p.Results.WeekdaysOnly;
+excludeOperators = normalizeOperatorList(p.Results.ExcludeOperators);
+minOperatorTotalCases = p.Results.MinOperatorTotalCases;
 
 fprintf('=== HISTORICAL DATA ANALYSIS ===\n');
 
@@ -114,7 +138,8 @@ end
 
 fprintf('Analyzing historical data structure with %d cases\n', length(historicalData.caseID));
 
-filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly);
+filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly, ...
+    excludeOperators, minOperatorTotalCases);
 if filterMetadata.filterApplied
     historicalData = filterHistoricalDataByMask(historicalData, filterMetadata.caseMask);
     historicalSchedules = filterHistoricalSchedulesByIncludedDates(historicalSchedules, ...
@@ -126,6 +151,8 @@ end
 
 % Initialize results structure
 analysisResults = struct();
+analysisResults.inputOptions = createAnalysisInputOptions(showStats, saveReport, reportFile, ...
+    dateRange, weekdaysOnly, excludeOperators, minOperatorTotalCases, p.Results.HistoricalSchedules, filterMetadata);
 
 % Perform detailed statistical analysis
 [analysisResults.datasetSummary, analysisResults.procedureAnalysis, ...
@@ -134,6 +161,16 @@ analysisResults = struct();
 analysisResults.datasetSummary.filterApplied = filterMetadata.filterApplied;
 analysisResults.datasetSummary.dateRangeFilterApplied = filterMetadata.dateRangeFilterApplied;
 analysisResults.datasetSummary.weekdaysOnly = filterMetadata.weekdaysOnly;
+analysisResults.datasetSummary.operatorExclusionApplied = filterMetadata.operatorExclusionApplied;
+analysisResults.datasetSummary.excludedOperatorsRequested = filterMetadata.excludedOperatorsRequested;
+analysisResults.datasetSummary.excludedOperatorsMatched = filterMetadata.excludedOperatorsMatched;
+analysisResults.datasetSummary.excludedOperatorsUnmatched = filterMetadata.excludedOperatorsUnmatched;
+analysisResults.datasetSummary.minOperatorTotalCases = filterMetadata.minOperatorTotalCases;
+analysisResults.datasetSummary.minOperatorTotalCasesApplied = filterMetadata.minOperatorTotalCasesApplied;
+analysisResults.datasetSummary.operatorsExcludedByMinCases = filterMetadata.operatorsExcludedByMinCases;
+analysisResults.datasetSummary.operatorCaseCountsForThreshold = filterMetadata.operatorCaseCountsForThreshold;
+analysisResults.datasetSummary.finalOperatorLevelExclusions = filterMetadata.finalOperatorLevelExclusions;
+analysisResults.datasetSummary.operatorLevelExclusionOnly = filterMetadata.operatorLevelExclusionOnly;
 analysisResults.datasetSummary.analysisStartDate = filterMetadata.analysisStartDate;
 analysisResults.datasetSummary.analysisEndDate = filterMetadata.analysisEndDate;
 analysisResults.datasetSummary.nCasesBeforeFilter = filterMetadata.nCasesBeforeFilter;
@@ -174,6 +211,17 @@ if showStats
 end
 analysisResults.comprehensiveOperatorMetrics = createComprehensiveOperatorMetrics(historicalData, analysisResults.operatorAnalysis, showStats);
 
+analysisResults = applyOperatorLevelExclusions(analysisResults, filterMetadata.finalOperatorLevelExclusions);
+if filterMetadata.operatorExclusionApplied
+    fprintf('Operator-level exclusion applied: %d final exclusion(s); department metrics preserved\n', ...
+        length(filterMetadata.finalOperatorLevelExclusions));
+end
+
+analysisResults.timeSeriesAnalysis = createTimeSeriesAnalysis(analysisResults.scheduleAnalysis, ...
+    analysisResults.operatorAnalysis, analysisResults.labFlipAnalysis);
+analysisResults.manuscriptOperatorAssociation = createManuscriptOperatorAssociation(analysisResults.timeSeriesAnalysis);
+analysisResults.metricDefinitions = createOperationalMetricDefinitions();
+
 % Calculate operator efficiency summary using comprehensive metrics
 analysisResults.scheduleAnalysis.operatorEfficiencySummary = calculateOperatorEfficiencySummary([], [], [], analysisResults.comprehensiveOperatorMetrics);
 
@@ -193,21 +241,64 @@ isValid = isempty(dateRange) || ...
     (ischar(dateRange) && size(dateRange, 1) == 2);
 end
 
-function filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly)
+function isValid = isValidOperatorListInput(operatorList)
+isValid = isempty(operatorList) || ischar(operatorList) || isstring(operatorList) || iscellstr(operatorList);
+end
+
+function isValid = isValidMinOperatorTotalCases(minCases)
+isValid = isempty(minCases) || (isnumeric(minCases) && isscalar(minCases) && isfinite(minCases) && minCases > 0 && floor(minCases) == minCases);
+end
+
+function operatorList = normalizeOperatorList(operatorListInput)
+if isempty(operatorListInput)
+    operatorList = {};
+    return;
+end
+
+if ischar(operatorListInput)
+    operatorList = {strtrim(operatorListInput)};
+elseif isstring(operatorListInput)
+    operatorList = cellstr(strtrim(operatorListInput(:)));
+else
+    operatorList = cellfun(@strtrim, operatorListInput(:), 'UniformOutput', false);
+end
+
+operatorList = operatorList(~cellfun(@isempty, operatorList));
+operatorList = unique(operatorList, 'stable');
+end
+
+function filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly, excludeOperators, minOperatorTotalCases)
 nCases = length(historicalData.caseID);
 dateObjects = parseHistoricalDateValues(historicalData.date);
 validDates = dateObjects(~isnat(dateObjects));
 dateRangeFilterApplied = ~isempty(dateRange);
+[excludedOperatorsMatched, excludedOperatorsUnmatched] = matchExcludedOperators(historicalData, excludeOperators);
+minOperatorTotalCasesApplied = ~isempty(minOperatorTotalCases);
 
 filterMetadata = struct();
 filterMetadata.filterApplied = dateRangeFilterApplied || weekdaysOnly;
 filterMetadata.dateRangeFilterApplied = dateRangeFilterApplied;
 filterMetadata.weekdaysOnly = weekdaysOnly;
+filterMetadata.operatorExclusionApplied = ~isempty(excludeOperators) || minOperatorTotalCasesApplied;
+filterMetadata.operatorLevelExclusionOnly = true;
+filterMetadata.excludedOperatorsRequested = excludeOperators;
+filterMetadata.excludedOperatorsMatched = excludedOperatorsMatched;
+filterMetadata.excludedOperatorsUnmatched = excludedOperatorsUnmatched;
+filterMetadata.minOperatorTotalCases = minOperatorTotalCases;
+filterMetadata.minOperatorTotalCasesApplied = minOperatorTotalCasesApplied;
+filterMetadata.operatorsExcludedByMinCases = {};
+filterMetadata.operatorCaseCountsForThreshold = struct();
+filterMetadata.finalOperatorLevelExclusions = excludedOperatorsMatched;
 filterMetadata.nCasesBeforeFilter = nCases;
 filterMetadata.nCasesAfterFilter = nCases;
 filterMetadata.caseMask = true(nCases, 1);
 filterMetadata.includedDates = unique(validDates);
 filterMetadata.filterDescription = 'no filter';
+
+if ~isempty(excludedOperatorsUnmatched)
+    warning('ExcludeOperators did not match loaded operator names: %s', ...
+        strjoin(excludedOperatorsUnmatched, ', '));
+end
 
 if isempty(validDates)
     filterMetadata.analysisStartDate = NaT;
@@ -228,14 +319,14 @@ if dateRangeFilterApplied
     analysisEndDate = parsedDateRange(2);
     filterMetadata.caseMask = filterMetadata.caseMask & ...
         (dateObjects >= analysisStartDate & dateObjects <= analysisEndDate);
-    filterDescriptions{end+1} = sprintf('date range %s to %s', ... %#ok<AGROW>
+    filterDescriptions{end+1} = sprintf('date range %s to %s', ...
         char(string(analysisStartDate)), char(string(analysisEndDate)));
 end
 
 if weekdaysOnly
     validWeekdayMask = ~isnat(dateObjects) & ismember(weekday(dateObjects), 2:6);
     filterMetadata.caseMask = filterMetadata.caseMask & validWeekdayMask;
-    filterDescriptions{end+1} = 'weekdays only'; %#ok<AGROW>
+    filterDescriptions{end+1} = 'weekdays only';
 end
 
 if filterMetadata.filterApplied
@@ -252,6 +343,12 @@ else
     filterMetadata.analysisStartDate = analysisStartDate;
     filterMetadata.analysisEndDate = analysisEndDate;
 end
+
+[operatorsExcludedByMinCases, operatorCaseCountsForThreshold] = ...
+    findOperatorsBelowMinCaseThreshold(historicalData, filterMetadata.caseMask, minOperatorTotalCases);
+filterMetadata.operatorsExcludedByMinCases = operatorsExcludedByMinCases;
+filterMetadata.operatorCaseCountsForThreshold = operatorCaseCountsForThreshold;
+filterMetadata.finalOperatorLevelExclusions = unique([excludedOperatorsMatched(:); operatorsExcludedByMinCases(:)]', 'stable');
 end
 
 function dateRange = parseDateRangeInput(dateRangeInput)
@@ -260,6 +357,53 @@ if numel(dateRange) ~= 2 || any(isnat(dateRange))
     error('DateRange must contain two valid dates.');
 end
 dateRange = sort(dateRange(:))';
+end
+
+function [matchedOperators, unmatchedOperators] = matchExcludedOperators(historicalData, excludeOperators)
+matchedOperators = {};
+unmatchedOperators = excludeOperators;
+
+if isempty(excludeOperators)
+    return;
+end
+
+loadedOperators = cellstr(string(historicalData.surgeon(:)));
+uniqueLoadedOperators = unique(loadedOperators, 'stable');
+
+for i = 1:length(excludeOperators)
+    operatorName = excludeOperators{i};
+    if any(strcmp(loadedOperators, operatorName))
+        matchedOperators{end+1} = operatorName; %#ok<AGROW>
+    end
+end
+
+matchedOperators = unique(matchedOperators, 'stable');
+unmatchedOperators = setdiff(excludeOperators, uniqueLoadedOperators, 'stable');
+end
+
+function [operatorsExcluded, operatorCaseCounts] = findOperatorsBelowMinCaseThreshold(historicalData, caseMask, minOperatorTotalCases)
+operatorsExcluded = {};
+operatorCaseCounts = struct();
+
+if isempty(minOperatorTotalCases)
+    return;
+end
+
+surgeons = string(historicalData.surgeon(:));
+caseMask = caseMask(:) & ~ismissing(surgeons) & strlength(surgeons) > 0;
+includedOperators = unique(cellstr(surgeons(caseMask)), 'stable');
+surgeonCells = cellstr(surgeons);
+
+for i = 1:length(includedOperators)
+    operatorName = includedOperators{i};
+    caseCount = sum(caseMask & strcmp(surgeonCells, operatorName));
+    operatorCaseCounts.(matlab.lang.makeValidName(operatorName)) = struct( ...
+        'operatorName', operatorName, ...
+        'totalCases', caseCount);
+    if caseCount < minOperatorTotalCases
+        operatorsExcluded{end+1} = operatorName; %#ok<AGROW>
+    end
+end
 end
 
 function historicalData = filterHistoricalDataByMask(historicalData, caseMask)
@@ -299,6 +443,529 @@ for i = 1:length(scheduleKeys)
     end
     if isKey(includedDateKeys, scheduleDateKey)
         filteredSchedules(scheduleKey) = historicalSchedules(scheduleKey);
+    end
+end
+end
+
+function inputOptions = createAnalysisInputOptions(showStats, saveReport, reportFile, dateRange, ...
+    weekdaysOnly, excludeOperators, minOperatorTotalCases, historicalSchedules, filterMetadata)
+inputOptions = struct();
+inputOptions.ShowStats = showStats;
+inputOptions.SaveReport = saveReport;
+inputOptions.ReportFile = reportFile;
+inputOptions.DateRange = dateRange;
+inputOptions.NormalizedDateRange = [filterMetadata.analysisStartDate, filterMetadata.analysisEndDate];
+inputOptions.WeekdaysOnly = weekdaysOnly;
+inputOptions.ExcludeOperators = excludeOperators;
+inputOptions.MinOperatorTotalCases = minOperatorTotalCases;
+inputOptions.HistoricalSchedulesProvided = ~isempty(historicalSchedules);
+if isempty(historicalSchedules)
+    inputOptions.HistoricalScheduleCount = 0;
+else
+    inputOptions.HistoricalScheduleCount = length(keys(historicalSchedules));
+end
+inputOptions.FilterApplied = filterMetadata.filterApplied;
+inputOptions.DateRangeFilterApplied = filterMetadata.dateRangeFilterApplied;
+inputOptions.OperatorExclusionApplied = filterMetadata.operatorExclusionApplied;
+inputOptions.OperatorLevelExclusionOnly = filterMetadata.operatorLevelExclusionOnly;
+inputOptions.ExcludedOperatorsRequested = filterMetadata.excludedOperatorsRequested;
+inputOptions.ExcludedOperatorsMatched = filterMetadata.excludedOperatorsMatched;
+inputOptions.ExcludedOperatorsUnmatched = filterMetadata.excludedOperatorsUnmatched;
+inputOptions.MinOperatorTotalCasesApplied = filterMetadata.minOperatorTotalCasesApplied;
+inputOptions.OperatorsExcludedByMinCases = filterMetadata.operatorsExcludedByMinCases;
+inputOptions.OperatorCaseCountsForThreshold = filterMetadata.operatorCaseCountsForThreshold;
+inputOptions.FinalOperatorLevelExclusions = filterMetadata.finalOperatorLevelExclusions;
+inputOptions.NCasesBeforeFilter = filterMetadata.nCasesBeforeFilter;
+inputOptions.NCasesAfterFilter = filterMetadata.nCasesAfterFilter;
+inputOptions.FilterDescription = filterMetadata.filterDescription;
+end
+
+function analysisResults = applyOperatorLevelExclusions(analysisResults, excludedOperators)
+if isempty(excludedOperators)
+    return;
+end
+
+analysisResults.operatorMetrics = removeOperatorFieldsFromStruct(analysisResults.operatorMetrics, excludedOperators);
+analysisResults.operatorPlottingData = createOperatorPlottingData(analysisResults.operatorMetrics);
+analysisResults.procedureTimeByOperator = removeOperatorFieldsFromStruct(analysisResults.procedureTimeByOperator, excludedOperators);
+analysisResults.procedurePlottingData = createProcedurePlottingData(analysisResults.procedureTimeAnalysis, analysisResults.procedureTimeByOperator);
+analysisResults.comprehensiveOperatorMetrics = removeOperatorFieldsFromStruct(analysisResults.comprehensiveOperatorMetrics, excludedOperators);
+
+if ~isempty(analysisResults.operatorAnalysis)
+    analysisResults.operatorAnalysis = removeOperatorsFromOperatorAnalysis(analysisResults.operatorAnalysis, excludedOperators);
+end
+
+if ~isempty(analysisResults.labFlipAnalysis) && isfield(analysisResults.labFlipAnalysis, 'operatorFlipStats')
+    analysisResults.labFlipAnalysis.operatorFlipStats = removeOperatorsFromMap(analysisResults.labFlipAnalysis.operatorFlipStats, excludedOperators);
+end
+end
+
+function dataStruct = removeOperatorFieldsFromStruct(dataStruct, excludedOperators)
+if isempty(dataStruct) || ~isstruct(dataStruct)
+    return;
+end
+
+for i = 1:length(excludedOperators)
+    fieldName = matlab.lang.makeValidName(excludedOperators{i});
+    if isfield(dataStruct, fieldName)
+        dataStruct = rmfield(dataStruct, fieldName);
+    end
+end
+end
+
+function operatorAnalysis = removeOperatorsFromOperatorAnalysis(operatorAnalysis, excludedOperators)
+mapFields = {'idleTimeStats', 'caseStats', 'workTimeStats', 'multiProcedureDayAverages'};
+for i = 1:length(mapFields)
+    fieldName = mapFields{i};
+    if isfield(operatorAnalysis, fieldName)
+        operatorAnalysis.(fieldName) = removeOperatorsFromMap(operatorAnalysis.(fieldName), excludedOperators);
+    end
+end
+end
+
+function dataMap = removeOperatorsFromMap(dataMap, excludedOperators)
+if isempty(dataMap) || ~isa(dataMap, 'containers.Map')
+    return;
+end
+
+for i = 1:length(excludedOperators)
+    operatorName = excludedOperators{i};
+    if isKey(dataMap, operatorName)
+        remove(dataMap, operatorName);
+    end
+end
+end
+
+function timeSeriesAnalysis = createTimeSeriesAnalysis(scheduleAnalysis, operatorAnalysis, labFlipAnalysis)
+timeSeriesAnalysis = struct();
+binUnits = {'day', 'week', 'month', 'quarter', 'year'};
+
+if isempty(operatorAnalysis) || ~isfield(operatorAnalysis, 'analyzedDates') || ...
+        isempty(operatorAnalysis.analyzedDates)
+    return;
+end
+
+sourceDates = convertAnalysisDateStringsToDatetime(operatorAnalysis.analyzedDates);
+if isempty(sourceDates) || any(isnat(sourceDates))
+    warning('Unable to create time-series analysis because analyzed dates could not be parsed.');
+    return;
+end
+
+for unitIdx = 1:length(binUnits)
+    binUnit = binUnits{unitIdx};
+    timeSeriesAnalysis.(binUnit) = buildBinnedTimeSeriesSummary(scheduleAnalysis, ...
+        operatorAnalysis, labFlipAnalysis, sourceDates, binUnit);
+end
+end
+
+function metricDefinitions = createOperationalMetricDefinitions()
+metricDefinitions = struct();
+metricDefinitions.operatorTurnovers = ['Number of same-operator consecutive-case ' ...
+    'opportunities; already stored as timeSeriesAnalysis.<bin>.department.totalOperatorTurnovers.'];
+metricDefinitions.totalProcedures = ['Number of department procedures completed in the ' ...
+    'calendar bin.'];
+metricDefinitions.procedureDuration = ['Valid observed procedure start-to-complete duration ' ...
+    'in minutes; binned means and medians are computed from pooled positive observations in the bin.'];
+metricDefinitions.proceduresPerDepartmentOperatingHour = ['Total procedures divided by ' ...
+    'summed daily department makespan hours within the bin.'];
+metricDefinitions.proceduresPerActiveLabHour = ['Total procedures divided by summed daily ' ...
+    'active-lab hours, where active-lab hours equal active labs multiplied by daily makespan.'];
+metricDefinitions.observedSameLabInterCaseInterval = ['Observed wheels-out to next ' ...
+    'wheels-in interval for consecutive cases in one lab when adjacent room-boundary ' ...
+    'components are valid; this is not assumed to separate turnover work from unused room time.'];
+end
+
+function operatorAssociation = createManuscriptOperatorAssociation(timeSeriesAnalysis)
+operatorAssociation = struct();
+if ~isfield(timeSeriesAnalysis, 'day') || ~isfield(timeSeriesAnalysis.day, 'operators')
+    return;
+end
+
+dailyOperators = timeSeriesAnalysis.day.operators;
+operatorAssociation.operatorNames = dailyOperators.operatorNames;
+operatorAssociation.totalLabFlips = sum(dailyOperators.totalFlips, 2);
+operatorAssociation.totalOperatorTurnovers = sum(dailyOperators.flipEligibleOperatorTurnovers, 2);
+operatorAssociation.pooledFlipRatioPercent = NaN(size(operatorAssociation.totalOperatorTurnovers));
+validTurnovers = operatorAssociation.totalOperatorTurnovers > 0;
+operatorAssociation.pooledFlipRatioPercent(validTurnovers) = ...
+    operatorAssociation.totalLabFlips(validTurnovers) ./ ...
+    operatorAssociation.totalOperatorTurnovers(validTurnovers) * 100;
+operatorAssociation.medianIdleTimePerTurnover = median(dailyOperators.idleTimePerTurnover, 2, 'omitnan');
+operatorAssociation.medianIdleTimePerTurnover(all(~isfinite(dailyOperators.idleTimePerTurnover), 2)) = NaN;
+operatorAssociation.relationship = calculateRelationshipStats( ...
+    operatorAssociation.pooledFlipRatioPercent, ...
+    operatorAssociation.medianIdleTimePerTurnover);
+end
+
+function binned = buildBinnedTimeSeriesSummary(scheduleAnalysis, operatorAnalysis, labFlipAnalysis, sourceDates, binUnit)
+sourceBinStarts = getTimeBinStarts(sourceDates, binUnit);
+binStartDates = buildCompleteTimeBinSequence(min(sourceBinStarts), max(sourceBinStarts), binUnit);
+numBins = length(binStartDates);
+binEndDates = NaT(numBins, 1);
+for binIdx = 1:numBins
+    binEndDates(binIdx) = incrementTimeBinDate(binStartDates(binIdx), binUnit) - days(1);
+end
+
+sourceBinIndex = zeros(length(sourceDates), 1);
+for dateIdx = 1:length(sourceDates)
+    sourceBinIndex(dateIdx) = find(binStartDates == sourceBinStarts(dateIdx), 1, 'first');
+end
+
+binned = struct();
+binned.binUnit = binUnit;
+binned.binStartDates = binStartDates;
+binned.binEndDates = binEndDates;
+binned.binLabels = createTimeBinLabels(binStartDates, binUnit);
+binned.department = buildDepartmentBinnedSeries(scheduleAnalysis, operatorAnalysis.analyzedDates, ...
+    sourceBinIndex, numBins);
+binned.operators = buildOperatorBinnedSeries(operatorAnalysis, labFlipAnalysis, ...
+    sourceBinIndex, numBins);
+binned.trends = struct();
+binned.trends.includedOperatorFlipRatioPercent = calculateBinnedTrendStats( ...
+    binned.operators.pooledFlipRatioPercent);
+binned.trends.departmentFlipRatioPercent = calculateBinnedTrendStats( ...
+    binned.department.labFlipPerOperatorTurnoverPercent);
+binned.trends.departmentOperatorIdlePerTurnover = calculateBinnedTrendStats( ...
+    binned.department.operatorIdlePerOperatorTurnover);
+binned.trends.medianOperatorIdlePerTurnover = calculateBinnedTrendStats( ...
+    binned.operators.medianIdleTimePerTurnover);
+binned.relationships = struct();
+binned.relationships.departmentFlipVsIdle = calculateRelationshipStats( ...
+    binned.department.labFlipPerOperatorTurnoverPercent, ...
+    binned.department.operatorIdlePerOperatorTurnover);
+end
+
+function department = buildDepartmentBinnedSeries(scheduleAnalysis, analyzedDates, sourceBinIndex, numBins)
+department = struct();
+department.totalLabFlips = zeros(numBins, 1);
+department.totalOperatorTurnovers = zeros(numBins, 1);
+department.totalOperatorIdleMinutes = zeros(numBins, 1);
+department.activeDays = zeros(numBins, 1);
+department.daysWithOperatorTurnoverOpportunities = zeros(numBins, 1);
+department.volume = struct('totalProcedures', zeros(numBins, 1), ...
+    'meanProceduresPerActiveDay', NaN(numBins, 1));
+department.duration = struct('procedureDurationCount', zeros(numBins, 1), ...
+    'totalProcedureMinutes', zeros(numBins, 1), ...
+    'meanProcedureDurationMinutes', NaN(numBins, 1), ...
+    'medianProcedureDurationMinutes', NaN(numBins, 1));
+department.throughput = struct('totalDepartmentOperatingHours', zeros(numBins, 1), ...
+    'totalActiveLabHours', zeros(numBins, 1), ...
+    'proceduresPerDepartmentOperatingHour', NaN(numBins, 1), ...
+    'proceduresPerActiveLabHour', NaN(numBins, 1));
+department.bottleneck = struct('totalSetupMinutes', zeros(numBins, 1), ...
+    'totalProcedureMinutes', zeros(numBins, 1), ...
+    'totalPostMinutes', zeros(numBins, 1), ...
+    'totalObservedSameLabInterCaseMinutes', zeros(numBins, 1), ...
+    'meanObservedSameLabInterCaseMinutes', NaN(numBins, 1), ...
+    'medianObservedSameLabInterCaseMinutes', NaN(numBins, 1), ...
+    'observedSameLabInterCaseCount', zeros(numBins, 1), ...
+    'totalOperatorIdleMinutes', zeros(numBins, 1));
+procedureDurationValues = cell(numBins, 1);
+observedSameLabInterCaseValues = cell(numBins, 1);
+
+hasDailyEfficiency = isfield(scheduleAnalysis, 'dailyEfficiency') && ...
+    isfield(scheduleAnalysis.dailyEfficiency, 'byDate') && ...
+    ~isempty(scheduleAnalysis.dailyEfficiency.byDate);
+if hasDailyEfficiency
+    dailyEfficiency = scheduleAnalysis.dailyEfficiency.byDate;
+    for dateIdx = 1:length(analyzedDates)
+        dateKey = analyzedDates{dateIdx};
+        if ~isKey(dailyEfficiency, dateKey)
+            continue;
+        end
+        binIdx = sourceBinIndex(dateIdx);
+        dayData = dailyEfficiency(dateKey);
+        department.activeDays(binIdx) = department.activeDays(binIdx) + 1;
+        if isfield(dayData, 'overallDeptTotalLabFlipsDaily') && isfinite(dayData.overallDeptTotalLabFlipsDaily)
+            department.totalLabFlips(binIdx) = department.totalLabFlips(binIdx) + dayData.overallDeptTotalLabFlipsDaily;
+        end
+        if isfield(dayData, 'overallDeptOperatorTurnoversDaily') && isfinite(dayData.overallDeptOperatorTurnoversDaily)
+            turnovers = dayData.overallDeptOperatorTurnoversDaily;
+            department.totalOperatorTurnovers(binIdx) = department.totalOperatorTurnovers(binIdx) + turnovers;
+            if turnovers > 0
+                department.daysWithOperatorTurnoverOpportunities(binIdx) = ...
+                    department.daysWithOperatorTurnoverOpportunities(binIdx) + 1;
+            end
+        end
+        if isfield(dayData, 'overallDeptTotalOperatorIdleTimeDaily') && isfinite(dayData.overallDeptTotalOperatorIdleTimeDaily)
+            department.totalOperatorIdleMinutes(binIdx) = department.totalOperatorIdleMinutes(binIdx) + ...
+                dayData.overallDeptTotalOperatorIdleTimeDaily;
+        end
+        if isfield(dayData, 'operationalMetrics')
+            dailyOperations = dayData.operationalMetrics;
+            department.volume.totalProcedures(binIdx) = department.volume.totalProcedures(binIdx) + ...
+                dailyOperations.totalProcedures;
+            department.duration.procedureDurationCount(binIdx) = department.duration.procedureDurationCount(binIdx) + ...
+                dailyOperations.procedureDurationCount;
+            department.duration.totalProcedureMinutes(binIdx) = department.duration.totalProcedureMinutes(binIdx) + ...
+                dailyOperations.totalProcedureMinutes;
+            if isfinite(dailyOperations.departmentOperatingMinutes)
+                department.throughput.totalDepartmentOperatingHours(binIdx) = ...
+                    department.throughput.totalDepartmentOperatingHours(binIdx) + ...
+                    dailyOperations.departmentOperatingMinutes / 60;
+            end
+            if isfinite(dailyOperations.activeLabMinutes)
+                department.throughput.totalActiveLabHours(binIdx) = ...
+                    department.throughput.totalActiveLabHours(binIdx) + ...
+                    dailyOperations.activeLabMinutes / 60;
+            end
+            department.bottleneck.totalSetupMinutes(binIdx) = department.bottleneck.totalSetupMinutes(binIdx) + ...
+                dailyOperations.totalSetupMinutes;
+            department.bottleneck.totalProcedureMinutes(binIdx) = department.bottleneck.totalProcedureMinutes(binIdx) + ...
+                dailyOperations.totalProcedureMinutes;
+            department.bottleneck.totalPostMinutes(binIdx) = department.bottleneck.totalPostMinutes(binIdx) + ...
+                dailyOperations.totalPostMinutes;
+            department.bottleneck.totalObservedSameLabInterCaseMinutes(binIdx) = ...
+                department.bottleneck.totalObservedSameLabInterCaseMinutes(binIdx) + ...
+                dailyOperations.totalObservedSameLabInterCaseMinutes;
+            department.bottleneck.observedSameLabInterCaseCount(binIdx) = ...
+                department.bottleneck.observedSameLabInterCaseCount(binIdx) + ...
+                dailyOperations.observedSameLabInterCaseCount;
+            department.bottleneck.totalOperatorIdleMinutes(binIdx) = ...
+                department.bottleneck.totalOperatorIdleMinutes(binIdx) + ...
+                dayData.overallDeptTotalOperatorIdleTimeDaily;
+            procedureDurationValues{binIdx} = [procedureDurationValues{binIdx}, ...
+                dailyOperations.procedureDurationMinutes];
+            observedSameLabInterCaseValues{binIdx} = [observedSameLabInterCaseValues{binIdx}, ...
+                dailyOperations.observedSameLabInterCaseMinutes];
+        end
+    end
+end
+
+department.labFlipPerOperatorTurnover = NaN(numBins, 1);
+department.operatorIdlePerOperatorTurnover = NaN(numBins, 1);
+validDenominator = department.totalOperatorTurnovers > 0;
+department.labFlipPerOperatorTurnover(validDenominator) = ...
+    department.totalLabFlips(validDenominator) ./ department.totalOperatorTurnovers(validDenominator);
+department.operatorIdlePerOperatorTurnover(validDenominator) = ...
+    department.totalOperatorIdleMinutes(validDenominator) ./ department.totalOperatorTurnovers(validDenominator);
+department.labFlipPerOperatorTurnoverPercent = department.labFlipPerOperatorTurnover * 100;
+activeDayBins = department.activeDays > 0;
+department.volume.meanProceduresPerActiveDay(activeDayBins) = ...
+    department.volume.totalProcedures(activeDayBins) ./ department.activeDays(activeDayBins);
+validProcedureBins = department.duration.procedureDurationCount > 0;
+department.duration.meanProcedureDurationMinutes(validProcedureBins) = ...
+    department.duration.totalProcedureMinutes(validProcedureBins) ./ ...
+    department.duration.procedureDurationCount(validProcedureBins);
+for binIdx = 1:numBins
+    if ~isempty(procedureDurationValues{binIdx})
+        department.duration.medianProcedureDurationMinutes(binIdx) = median(procedureDurationValues{binIdx});
+    end
+    if ~isempty(observedSameLabInterCaseValues{binIdx})
+        department.bottleneck.medianObservedSameLabInterCaseMinutes(binIdx) = ...
+            median(observedSameLabInterCaseValues{binIdx});
+    end
+end
+validDepartmentHours = department.throughput.totalDepartmentOperatingHours > 0;
+department.throughput.proceduresPerDepartmentOperatingHour(validDepartmentHours) = ...
+    department.volume.totalProcedures(validDepartmentHours) ./ ...
+    department.throughput.totalDepartmentOperatingHours(validDepartmentHours);
+validActiveLabHours = department.throughput.totalActiveLabHours > 0;
+department.throughput.proceduresPerActiveLabHour(validActiveLabHours) = ...
+    department.volume.totalProcedures(validActiveLabHours) ./ ...
+    department.throughput.totalActiveLabHours(validActiveLabHours);
+validObservedIntervals = department.bottleneck.observedSameLabInterCaseCount > 0;
+department.bottleneck.meanObservedSameLabInterCaseMinutes(validObservedIntervals) = ...
+    department.bottleneck.totalObservedSameLabInterCaseMinutes(validObservedIntervals) ./ ...
+    department.bottleneck.observedSameLabInterCaseCount(validObservedIntervals);
+end
+
+function operators = buildOperatorBinnedSeries(operatorAnalysis, labFlipAnalysis, sourceBinIndex, numBins)
+operators = struct();
+operatorNames = keys(operatorAnalysis.caseStats);
+numOperators = length(operatorNames);
+operators.operatorNames = operatorNames;
+operators.totalFlips = zeros(numOperators, numBins);
+operators.flipEligibleOperatorTurnovers = zeros(numOperators, numBins);
+operators.totalIdleMinutes = zeros(numOperators, numBins);
+operators.idleEligibleOperatorTurnovers = zeros(numOperators, numBins);
+
+hasFlipStats = ~isempty(labFlipAnalysis) && isfield(labFlipAnalysis, 'operatorFlipStats');
+for operatorIdx = 1:numOperators
+    operatorName = operatorNames{operatorIdx};
+    caseArray = operatorAnalysis.caseStats(operatorName);
+    idleArray = operatorAnalysis.idleTimeStats(operatorName);
+    flipArray = [];
+    if hasFlipStats && isKey(labFlipAnalysis.operatorFlipStats, operatorName)
+        flipArray = labFlipAnalysis.operatorFlipStats(operatorName);
+    end
+    for dateIdx = 1:length(sourceBinIndex)
+        if dateIdx > length(caseArray) || isnan(caseArray(dateIdx)) || caseArray(dateIdx) <= 1
+            continue;
+        end
+        binIdx = sourceBinIndex(dateIdx);
+        turnovers = caseArray(dateIdx) - 1;
+        if dateIdx <= length(flipArray) && isfinite(flipArray(dateIdx))
+            operators.totalFlips(operatorIdx, binIdx) = operators.totalFlips(operatorIdx, binIdx) + flipArray(dateIdx);
+            operators.flipEligibleOperatorTurnovers(operatorIdx, binIdx) = ...
+                operators.flipEligibleOperatorTurnovers(operatorIdx, binIdx) + turnovers;
+        end
+        if dateIdx <= length(idleArray) && isfinite(idleArray(dateIdx))
+            operators.totalIdleMinutes(operatorIdx, binIdx) = ...
+                operators.totalIdleMinutes(operatorIdx, binIdx) + idleArray(dateIdx);
+            operators.idleEligibleOperatorTurnovers(operatorIdx, binIdx) = ...
+                operators.idleEligibleOperatorTurnovers(operatorIdx, binIdx) + turnovers;
+        end
+    end
+end
+
+operators.flipRatioPercent = NaN(numOperators, numBins);
+validFlipDenominator = operators.flipEligibleOperatorTurnovers > 0;
+operators.flipRatioPercent(validFlipDenominator) = ...
+    operators.totalFlips(validFlipDenominator) ./ operators.flipEligibleOperatorTurnovers(validFlipDenominator) * 100;
+operators.idleTimePerTurnover = NaN(numOperators, numBins);
+validIdleDenominator = operators.idleEligibleOperatorTurnovers > 0;
+operators.idleTimePerTurnover(validIdleDenominator) = ...
+    operators.totalIdleMinutes(validIdleDenominator) ./ operators.idleEligibleOperatorTurnovers(validIdleDenominator);
+
+operators.totalPooledFlips = sum(operators.totalFlips, 1)';
+operators.totalPooledFlipEligibleTurnovers = sum(operators.flipEligibleOperatorTurnovers, 1)';
+operators.pooledFlipRatioPercent = NaN(numBins, 1);
+validPooledFlipDenominator = operators.totalPooledFlipEligibleTurnovers > 0;
+operators.pooledFlipRatioPercent(validPooledFlipDenominator) = ...
+    operators.totalPooledFlips(validPooledFlipDenominator) ./ ...
+    operators.totalPooledFlipEligibleTurnovers(validPooledFlipDenominator) * 100;
+operators.medianIdleTimePerTurnover = median(operators.idleTimePerTurnover, 1, 'omitnan')';
+operators.medianIdleTimePerTurnover(all(~isfinite(operators.idleTimePerTurnover), 1)) = NaN;
+operators.contributingFlipOperators = sum(validFlipDenominator, 1)';
+operators.contributingIdleOperators = sum(validIdleDenominator, 1)';
+end
+
+function trendStats = calculateBinnedTrendStats(values)
+values = values(:);
+xValues = (0:length(values)-1)';
+validValues = isfinite(values);
+trendStats = struct('slopePerBin', NaN, 'rSquared', NaN, ...
+    'fittedValues', NaN(size(values)), 'nBins', sum(validValues));
+if sum(validValues) < 2
+    return;
+end
+
+if exist('fitlm', 'file') == 2
+    model = fitlm(xValues(validValues), values(validValues));
+    trendStats.slopePerBin = model.Coefficients.Estimate(2);
+    trendStats.rSquared = model.Rsquared.Ordinary;
+    trendStats.fittedValues = predict(model, xValues);
+else
+    coefficients = polyfit(xValues(validValues), values(validValues), 1);
+    trendStats.slopePerBin = coefficients(1);
+    trendStats.fittedValues = polyval(coefficients, xValues);
+    fittedValid = trendStats.fittedValues(validValues);
+    residualSumSquares = sum((values(validValues) - fittedValid).^2);
+    totalSumSquares = sum((values(validValues) - mean(values(validValues))).^2);
+    if totalSumSquares > 0
+        trendStats.rSquared = 1 - residualSumSquares / totalSumSquares;
+    end
+end
+end
+
+function relationshipStats = calculateRelationshipStats(xValues, yValues)
+xValues = xValues(:);
+yValues = yValues(:);
+validValues = isfinite(xValues) & isfinite(yValues);
+relationshipStats = struct('slope', NaN, 'intercept', NaN, 'rSquared', NaN, ...
+    'fittedValues', NaN(size(yValues)), 'nBins', sum(validValues));
+if sum(validValues) < 2 || length(unique(xValues(validValues))) < 2
+    return;
+end
+
+if exist('fitlm', 'file') == 2
+    model = fitlm(xValues(validValues), yValues(validValues));
+    relationshipStats.intercept = model.Coefficients.Estimate(1);
+    relationshipStats.slope = model.Coefficients.Estimate(2);
+    relationshipStats.rSquared = model.Rsquared.Ordinary;
+    relationshipStats.fittedValues(validValues) = predict(model, xValues(validValues));
+else
+    coefficients = polyfit(xValues(validValues), yValues(validValues), 1);
+    relationshipStats.slope = coefficients(1);
+    relationshipStats.intercept = coefficients(2);
+    relationshipStats.fittedValues(validValues) = polyval(coefficients, xValues(validValues));
+    residualSumSquares = sum((yValues(validValues) - relationshipStats.fittedValues(validValues)).^2);
+    totalSumSquares = sum((yValues(validValues) - mean(yValues(validValues))).^2);
+    if totalSumSquares > 0
+        relationshipStats.rSquared = 1 - residualSumSquares / totalSumSquares;
+    end
+end
+end
+
+function dateObjects = convertAnalysisDateStringsToDatetime(dateStrings)
+dateObjects = NaT(length(dateStrings), 1);
+for dateIdx = 1:length(dateStrings)
+    try
+        dateObjects(dateIdx) = datetime(dateStrings{dateIdx}, 'InputFormat', 'dd-MMM-yyyy');
+    catch
+        try
+            dateObjects(dateIdx) = datetime(dateStrings{dateIdx});
+        catch
+            dateObjects = [];
+            return;
+        end
+    end
+end
+end
+
+function binStarts = getTimeBinStarts(dateObjects, binUnit)
+dateObjects = dateshift(dateObjects, 'start', 'day');
+switch binUnit
+    case 'day'
+        binStarts = dateObjects;
+    case 'week'
+        binStarts = dateObjects - days(mod(weekday(dateObjects) - 2, 7));
+    case 'month'
+        binStarts = dateshift(dateObjects, 'start', 'month');
+    case 'quarter'
+        monthStarts = dateshift(dateObjects, 'start', 'month');
+        quarterMonths = 1 + 3 * floor((month(monthStarts) - 1) / 3);
+        binStarts = datetime(year(monthStarts), quarterMonths, 1);
+    case 'year'
+        binStarts = datetime(year(dateObjects), 1, 1);
+    otherwise
+        error('Unsupported time bin: %s', binUnit);
+end
+end
+
+function binDates = buildCompleteTimeBinSequence(startDate, endDate, binUnit)
+binDates = startDate;
+nextDate = startDate;
+while nextDate < endDate
+    nextDate = incrementTimeBinDate(nextDate, binUnit);
+    binDates(end+1, 1) = nextDate; %#ok<AGROW>
+end
+binDates = binDates(:);
+end
+
+function nextDate = incrementTimeBinDate(dateValue, binUnit)
+switch binUnit
+    case 'day'
+        nextDate = dateValue + days(1);
+    case 'week'
+        nextDate = dateValue + days(7);
+    case 'month'
+        nextDate = dateValue + calmonths(1);
+    case 'quarter'
+        nextDate = dateValue + calmonths(3);
+    case 'year'
+        nextDate = dateValue + calyears(1);
+    otherwise
+        error('Unsupported time bin: %s', binUnit);
+end
+end
+
+function labels = createTimeBinLabels(binDates, binUnit)
+labels = cell(length(binDates), 1);
+for binIdx = 1:length(binDates)
+    switch binUnit
+        case 'day'
+            labels{binIdx} = char(string(binDates(binIdx), 'dd-MMM-yyyy'));
+        case 'week'
+            labels{binIdx} = ['Week of ' char(string(binDates(binIdx), 'dd-MMM-yyyy'))];
+        case 'month'
+            labels{binIdx} = char(string(binDates(binIdx), 'MMM yyyy'));
+        case 'quarter'
+            quarterNumber = floor((month(binDates(binIdx)) - 1) / 3) + 1;
+            labels{binIdx} = sprintf('%d Q%d', year(binDates(binIdx)), quarterNumber);
+        case 'year'
+            labels{binIdx} = sprintf('%d', year(binDates(binIdx)));
     end
 end
 end
@@ -701,36 +1368,11 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
                 totalOperatorIdle = 0;
             end
 
-            % Compute explicit lab/operator turnovers, room busy time (setup+proc+post), active labs, and fallback makespan bounds
-            labTurnovers = 0;
-            totalRoomBusyTime = 0;
-            numLabsActive = 0;
-            earliestStart = inf;
-            latestEnd = -inf;
-            if isfield(schedule, 'labs') && ~isempty(schedule.labs)
-                for labIdx = 1:length(schedule.labs)
-                    labCases = schedule.labs{labIdx};
-                    if ~isempty(labCases)
-                        numLabsActive = numLabsActive + 1;
-                        labTurnovers = labTurnovers + max(length(labCases) - 1, 0);
-                        for c = 1:length(labCases)
-                            if isfield(labCases(c), 'startTime') && isfield(labCases(c), 'endTime')
-                                totalRoomBusyTime = totalRoomBusyTime + max(labCases(c).endTime - labCases(c).startTime, 0);
-                                earliestStart = min(earliestStart, labCases(c).startTime);
-                                latestEnd = max(latestEnd, labCases(c).endTime);
-                            end
-                        end
-                    end
-                end
-            end
-
-            % Prefer recorded makespan; fallback to computed span if needed
-            makespanDay = NaN;
-            if isfield(results, 'makespan') && ~isempty(results.makespan)
-                makespanDay = results.makespan;
-            elseif isfinite(earliestStart) && isfinite(latestEnd) && latestEnd > earliestStart
-                makespanDay = latestEnd - earliestStart;
-            end
+            dailyOperations = summarizeDailyDepartmentOperations(schedule, results, historicalData, scheduleKey);
+            labTurnovers = dailyOperations.labTurnovers;
+            totalRoomBusyTime = dailyOperations.totalRoomBusyMinutes;
+            numLabsActive = dailyOperations.numLabsActive;
+            makespanDay = dailyOperations.departmentOperatingMinutes;
 
             operatorTurnovers = 0;
             try
@@ -796,6 +1438,7 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             dayEff.overallDeptTotalRoomBusyTimeDaily = totalRoomBusyTime;
             dayEff.overallDeptAvgConcurrentLabsDaily = avgConcurrentLabs;
             dayEff.overallDeptNumLabsActiveDaily = numLabsActive;
+            dayEff.operationalMetrics = dailyOperations;
             
             % Calculate number of operators with outpatient procedures this day
             operatorsWithOutpatient = 0;
@@ -1213,6 +1856,129 @@ function averages = calculateMultiProcedureAverages(operatorCaseStats, operatorI
         
         averages(opName) = opAverages;
     end
+end
+
+function dailyOperations = summarizeDailyDepartmentOperations(schedule, results, historicalData, scheduleKey)
+dailyOperations = struct();
+dailyOperations.totalProcedures = 0;
+dailyOperations.labTurnovers = 0;
+dailyOperations.numLabsActive = 0;
+dailyOperations.totalRoomBusyMinutes = 0;
+dailyOperations.totalSetupMinutes = 0;
+dailyOperations.totalProcedureMinutes = 0;
+dailyOperations.totalPostMinutes = 0;
+dailyOperations.procedureDurationMinutes = [];
+dailyOperations.procedureDurationCount = 0;
+dailyOperations.meanProcedureDurationMinutes = NaN;
+dailyOperations.medianProcedureDurationMinutes = NaN;
+dailyOperations.observedSameLabInterCaseMinutes = [];
+dailyOperations.observedSameLabInterCaseCount = 0;
+dailyOperations.totalObservedSameLabInterCaseMinutes = 0;
+dailyOperations.meanObservedSameLabInterCaseMinutes = NaN;
+dailyOperations.medianObservedSameLabInterCaseMinutes = NaN;
+earliestStart = inf;
+latestEnd = -inf;
+
+if isfield(schedule, 'labs') && ~isempty(schedule.labs)
+    for labIdx = 1:length(schedule.labs)
+        labCases = schedule.labs{labIdx};
+        if isempty(labCases)
+            continue;
+        end
+        dailyOperations.numLabsActive = dailyOperations.numLabsActive + 1;
+        dailyOperations.totalProcedures = dailyOperations.totalProcedures + length(labCases);
+        dailyOperations.labTurnovers = dailyOperations.labTurnovers + max(length(labCases) - 1, 0);
+        for caseIdx = 1:length(labCases)
+            caseData = labCases(caseIdx);
+            if isfield(caseData, 'startTime') && isfield(caseData, 'endTime') && ...
+                    isfinite(caseData.startTime) && isfinite(caseData.endTime)
+                dailyOperations.totalRoomBusyMinutes = dailyOperations.totalRoomBusyMinutes + ...
+                    max(caseData.endTime - caseData.startTime, 0);
+                earliestStart = min(earliestStart, caseData.startTime);
+                latestEnd = max(latestEnd, caseData.endTime);
+            end
+            dailyOperations.totalSetupMinutes = dailyOperations.totalSetupMinutes + ...
+                getNonnegativeDuration(caseData, 'setupTime');
+            procedureDuration = getNonnegativeDuration(caseData, 'procTime');
+            dailyOperations.totalProcedureMinutes = dailyOperations.totalProcedureMinutes + procedureDuration;
+            if isfield(caseData, 'procTime') && isfinite(caseData.procTime) && caseData.procTime >= 0
+                dailyOperations.procedureDurationMinutes(end+1) = caseData.procTime;
+            end
+            dailyOperations.totalPostMinutes = dailyOperations.totalPostMinutes + ...
+                getNonnegativeDuration(caseData, 'postTime');
+            if isfield(caseData, 'observedRoomGapAfterCase') && ...
+                    isfinite(caseData.observedRoomGapAfterCase) && caseData.observedRoomGapAfterCase >= 0
+                dailyOperations.observedSameLabInterCaseMinutes(end+1) = ...
+                    caseData.observedRoomGapAfterCase;
+            end
+        end
+    end
+end
+
+dailyOperations = replaceComponentTotalsWithObservedValues(dailyOperations, historicalData, scheduleKey);
+dailyOperations.procedureDurationCount = length(dailyOperations.procedureDurationMinutes);
+if dailyOperations.procedureDurationCount > 0
+    dailyOperations.meanProcedureDurationMinutes = mean(dailyOperations.procedureDurationMinutes);
+    dailyOperations.medianProcedureDurationMinutes = median(dailyOperations.procedureDurationMinutes);
+end
+dailyOperations.observedSameLabInterCaseCount = length(dailyOperations.observedSameLabInterCaseMinutes);
+if dailyOperations.observedSameLabInterCaseCount > 0
+    dailyOperations.totalObservedSameLabInterCaseMinutes = sum(dailyOperations.observedSameLabInterCaseMinutes);
+    dailyOperations.meanObservedSameLabInterCaseMinutes = mean(dailyOperations.observedSameLabInterCaseMinutes);
+    dailyOperations.medianObservedSameLabInterCaseMinutes = median(dailyOperations.observedSameLabInterCaseMinutes);
+end
+
+dailyOperations.departmentOperatingMinutes = NaN;
+if isfield(results, 'makespan') && isfinite(results.makespan) && results.makespan > 0
+    dailyOperations.departmentOperatingMinutes = results.makespan;
+elseif isfinite(earliestStart) && isfinite(latestEnd) && latestEnd > earliestStart
+    dailyOperations.departmentOperatingMinutes = latestEnd - earliestStart;
+end
+dailyOperations.activeLabMinutes = NaN;
+dailyOperations.proceduresPerDepartmentOperatingHour = NaN;
+dailyOperations.proceduresPerActiveLabHour = NaN;
+if isfinite(dailyOperations.departmentOperatingMinutes) && dailyOperations.departmentOperatingMinutes > 0
+    dailyOperations.activeLabMinutes = dailyOperations.departmentOperatingMinutes * dailyOperations.numLabsActive;
+    dailyOperations.proceduresPerDepartmentOperatingHour = dailyOperations.totalProcedures / ...
+        (dailyOperations.departmentOperatingMinutes / 60);
+    if dailyOperations.activeLabMinutes > 0
+        dailyOperations.proceduresPerActiveLabHour = dailyOperations.totalProcedures / ...
+            (dailyOperations.activeLabMinutes / 60);
+    end
+end
+end
+
+function dailyOperations = replaceComponentTotalsWithObservedValues(dailyOperations, historicalData, scheduleKey)
+requiredFields = {'date', 'setupTime', 'procedureTime', 'postTime'};
+if ~all(isfield(historicalData, requiredFields))
+    return;
+end
+targetDate = convertAnalysisDateStringsToDatetime({scheduleKey});
+if isempty(targetDate) || isnat(targetDate)
+    return;
+end
+historicalDates = dateshift(parseHistoricalDateValues(historicalData.date), 'start', 'day');
+dateMask = historicalDates == dateshift(targetDate, 'start', 'day');
+if ~any(dateMask)
+    return;
+end
+setupValues = historicalData.setupTime(dateMask);
+procedureValues = historicalData.procedureTime(dateMask);
+postValues = historicalData.postTime(dateMask);
+setupValues = setupValues(isfinite(setupValues) & setupValues > 0);
+procedureValues = procedureValues(isfinite(procedureValues) & procedureValues > 0);
+postValues = postValues(isfinite(postValues) & postValues > 0);
+dailyOperations.totalSetupMinutes = sum(setupValues);
+dailyOperations.procedureDurationMinutes = reshape(procedureValues, 1, []);
+dailyOperations.totalProcedureMinutes = sum(procedureValues);
+dailyOperations.totalPostMinutes = sum(postValues);
+end
+
+function duration = getNonnegativeDuration(caseData, fieldName)
+duration = 0;
+if isfield(caseData, fieldName) && isfinite(caseData.(fieldName)) && caseData.(fieldName) >= 0
+    duration = caseData.(fieldName);
+end
 end
 
 function [numCases, totalWorkTime] = calculateOperatorDayStats(opSchedule)

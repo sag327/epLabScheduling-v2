@@ -1,0 +1,51 @@
+\documentclass[12pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{lscape}
+
+\begin{document}
+
+\section{Methods}
+
+\subsection{Study design and data source}
+
+We performed a retrospective analysis of electrophysiology (EP) laboratory scheduling data from [INSTITUTION] between [START DATE] and [END DATE]. The study cohort included all EP procedures meeting prespecified inclusion criteria during the study period. Cases were identified from institutional procedural scheduling and perioperative time-stamp data. Extracted variables included case date, case identifier, primary operator, procedure type, service, procedural location, laboratory or room assignment, admission class, procedure start and completion timestamps, and component duration fields describing preprocedural setup time, procedure time, and postprocedural time. The final analytic cohort included [N CASES] procedures performed by [N OPERATORS] operators. [IRB/ETHICS LANGUAGE].
+
+Analyses were performed using custom MATLAB software (MathWorks, Natick, Massachusetts), version [SOFTWARE VERSION OR COMMIT]. The software was developed to reconstruct historical daily EP laboratory schedules from observed case-level data and to calculate operator-level and department-level measures of laboratory switching, operator idle time, turnover opportunities, and laboratory utilization.
+
+\subsection{Historical schedule reconstruction}
+
+For each calendar date, the custom software reconstructed the historical EP laboratory schedule using the observed room assignment and procedural timing for each case. Cases were assigned to their documented laboratory or room and to the recorded primary operator. Procedure start and procedure completion timestamps were converted to minutes from midnight. Total room occupancy for each case was estimated from the available setup, procedure, and postprocedure duration fields. Specifically, the reconstructed room start time was calculated as procedure start time minus setup duration, and the reconstructed room end time was calculated as procedure completion time plus postprocedure duration.
+
+Daily schedules were reconstructed separately for each date. Within each laboratory, cases were ordered chronologically by reconstructed start time. Within each operator schedule, cases were similarly ordered by procedure start time. Historical turnover time was not synthetically appended to cases. Instead, when room-gap measures were required, observed gaps were derived from reconstructed end time of one case and reconstructed start time of the next case in the same laboratory. Cases without valid procedure start timestamps were excluded from schedule reconstruction. If procedure completion timestamps were unavailable, cases were not used for observed procedure-completion--based idle-time calculations.
+
+\subsection{Definitions of turnover, laboratory flip, and operator idle time}
+
+An operator turnover was defined as a transition between consecutive cases performed by the same operator on the same calendar day. For an operator with $n$ cases on a given day, the number of operator turnovers was $n-1$ when $n>1$ and zero otherwise. A laboratory turnover was defined as a transition between consecutive cases in the same laboratory on the same calendar day. For a laboratory with $m$ cases on a given day, the number of laboratory turnovers was $m-1$ when $m>1$ and zero otherwise.
+
+A laboratory flip was defined as a same-operator transition in which consecutive cases for that operator occurred in different laboratories. Thus, laboratory flips quantify inter-room movement by an operator between consecutive cases. Operators with only one case on a given day had no operator turnover opportunity and were therefore not considered eligible for same-day flip-ratio or idle-time-per-turnover calculations for that operator-day.
+
+Operator idle time was calculated between consecutive same-operator cases as the elapsed time from procedure completion of the earlier case to procedure start of the subsequent case. Only positive intervals were counted as idle time. Negative or zero intervals, which may occur because of overlapping documentation, concurrent workflows, or timestamp imprecision, were not counted as positive idle time. Operator-day total idle time was calculated as the sum of positive idle intervals across all consecutive same-operator transitions on that day.
+
+\subsection{Operator-level and department-level metrics}
+
+For each operator-day with at least 2 procedures, the daily operator flip ratio was calculated as the number of laboratory flips divided by the number of operator turnovers. Operator idle time per turnover was calculated as total operator idle time divided by the number of operator turnovers. Operator-level summary measures were then calculated across eligible multi-procedure days. The primary operator-level idle-time metric was the median idle time per operator turnover, expressed in minutes per turnover. Operator-level flip performance was summarized as laboratory flips per operator turnover and expressed as a percentage where appropriate.
+
+Department-level metrics were calculated at the calendar-day level using the full reconstructed laboratory schedule for that day. Daily total operator idle time was calculated by summing positive idle intervals across all operators. Daily operator turnovers were calculated as the sum of same-operator turnovers across operators. Daily laboratory turnovers were calculated as the sum of same-laboratory turnovers across laboratories. Daily total laboratory flips were calculated as the sum of same-operator inter-laboratory transitions across operators.
+
+The primary department-level flip metric was laboratory flips per operator turnover, calculated as total daily laboratory flips divided by total daily operator turnovers. A secondary laboratory-centric metric, laboratory flips per laboratory turnover, was calculated as total daily laboratory flips divided by total daily laboratory turnovers. Department-level operator idle time was summarized as operator idle time per operator turnover, calculated as total daily operator idle minutes divided by total daily operator turnovers. Laboratory utilization and schedule span metrics were calculated from reconstructed room occupancy times and daily schedule start and end times. Average concurrent laboratory use was calculated as total room busy time divided by daily makespan.
+
+For time-series analyses, daily department metrics were plotted by calendar date. Operator-level time-series summaries were calculated from eligible operator-days. Missing operator-day values were retained as missing when an operator had no multi-procedure turnover opportunity on that date.
+
+\subsection{Sensitivity and cohort filtering}
+
+Analyses could be restricted to a prespecified date range or to weekdays only. Date-range and weekday filters were applied to the analytic cohort before reconstruction-derived summary statistics and plots were generated. Optional operator-level filters were also available. Operators could be excluded by exact name or by specifying a minimum total case count. These operator-level filters were applied only to operator-level summaries and visualizations; they did not remove cases from the reconstructed department schedule and did not alter department-level laboratory utilization, turnover, flip, or idle-time metrics. This approach preserved the historical departmental workload while allowing operator-level analyses to focus on operators with sufficient procedural volume for stable estimation.
+
+All parsed analysis options, including date range, weekday filtering, manually excluded operators, minimum operator case threshold, matched and unmatched operator exclusions, and final operator-level exclusion lists, were recorded in the output data structure to support reproducibility.
+
+\subsection{Statistical analysis}
+
+Continuous variables were summarized using means and standard deviations or medians and interquartile ranges, as appropriate. Categorical variables were summarized using counts and percentages. Operator-level flip ratios and idle-time metrics were summarized across eligible operator-days and operators. Department-level metrics were summarized across analyzed calendar days. For graphical time-series analyses, linear trends were estimated using ordinary least-squares regression, and slopes were expressed per 30-day month. Coefficients of determination ($R^2$) were reported for trend lines. Correlations between operator-level flip ratio and median idle time per turnover were assessed using scatter plots and correlation coefficients. All analyses were performed using custom MATLAB software; statistical significance was assessed using [STATISTICAL THRESHOLD, IF APPLICABLE].
+
+\end{document}
