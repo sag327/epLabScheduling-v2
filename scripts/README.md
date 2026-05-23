@@ -42,6 +42,18 @@ analysisResultsWeekdays = analyzeHistoricalData(historicalData, ...
     'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
     'WeekdaysOnly', true);
 
+% Default schedule-derived outputs use complete operational days:
+% any day containing a nonpositive/missing setup, procedure, or post duration is excluded.
+analysisResultsCompleteDays = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'WeekdaysOnly', true);
+
+% Sensitivity analysis: retain sequence-valid days for flip/idle comparisons.
+analysisResultsSequenceValid = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'WeekdaysOnly', true, ...
+    'PrimaryScheduleCohort', 'SequenceValidCases');
+
 % Optional: remove selected operators from operator-level summaries/plots only
 % Department metrics still include all cases in the date/weekday cohort.
 analysisResultsFiltered = analyzeHistoricalData(historicalData, ...
@@ -55,6 +67,7 @@ analysisResultsMinVolume = analyzeHistoricalData(historicalData, ...
 
 % All parsed analysis options are recorded for logging/reproducibility
 disp(analysisResultsFiltered.inputOptions);
+disp(analysisResultsCompleteDays.cohortSummary);
 
 % The analysis run precomputes time-series summaries at every supported interval
 disp(analysisResults.timeSeriesAnalysis.month.department);
@@ -111,6 +124,8 @@ plotAnalysisResults(analysisResults, ...
 ```
 
 `analyzeHistoricalData` creates denominator-preserving time-series summaries for day, week, month, quarter, and year. Within each bin, flip ratio is computed as summed lab flips divided by summed operator turnover opportunities, idle time per turnover uses summed idle minutes and turnovers, procedure duration means/medians use pooled valid observed procedure start-to-complete observations, and throughput uses pooled procedures divided by pooled operating-hour denominators. Procedures per department operating hour is the service-line throughput measure; procedures per active lab-hour is retained as its capacity-adjusted companion.
+
+Schedule-derived outputs default to the complete-operational-day cohort: setup, procedure, and post-procedure durations must be finite and positive for every included case on a day. The function always prints and logs invalid case/day counts, retained complete-day counts, component-specific invalid counts, and excluded dates/cases in `analysisResults.cohortSummary`. Use `'PrimaryScheduleCohort', 'SequenceValidCases'` for a flip/idle sensitivity analysis that retains otherwise sequence-valid days; do not interpret that sensitivity run as complete-day throughput or bottleneck decomposition.
 
 The `bottleneck` output stores summed valid observed setup, procedure, post-procedure, operator idle, and observed same-lab inter-case minutes. An observed same-lab inter-case interval is the reconstructed wheels-out–to–next-wheels-in gap in a single lab and is included only when both adjacent room-boundary component times are valid; it should not be interpreted as separately measured cleaning/turnover work or independently measured unused room time. Metric definitions are stored in `analysisResults.metricDefinitions`.
 

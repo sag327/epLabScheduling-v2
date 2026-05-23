@@ -27,6 +27,10 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %                          (default: {}, show all operators)
 %   'MinOperatorTotalCases' - positive integer minimum total cases required
 %                             for operator-level outputs only (default: [])
+%   'PrimaryScheduleCohort' - 'CompleteOperationalDays' (default) excludes
+%                             whole days with invalid setup/procedure/post
+%                             durations from schedule-derived outputs;
+%                             'SequenceValidCases' retains filtered days
 %
 % Examples:
 %   % Basic analysis (data only)
@@ -112,6 +116,7 @@ addParameter(p, 'DateRange', [], @isValidDateRangeInput);
 addParameter(p, 'WeekdaysOnly', false, @(x) islogical(x) && isscalar(x));
 addParameter(p, 'ExcludeOperators', {}, @isValidOperatorListInput);
 addParameter(p, 'MinOperatorTotalCases', [], @isValidMinOperatorTotalCases);
+addParameter(p, 'PrimaryScheduleCohort', 'CompleteOperationalDays', @isValidPrimaryScheduleCohort);
 
 % Parse the inputs
 parse(p, historicalData, varargin{:});
@@ -125,6 +130,7 @@ dateRange = p.Results.DateRange;
 weekdaysOnly = p.Results.WeekdaysOnly;
 excludeOperators = normalizeOperatorList(p.Results.ExcludeOperators);
 minOperatorTotalCases = p.Results.MinOperatorTotalCases;
+primaryScheduleCohort = char(p.Results.PrimaryScheduleCohort);
 
 fprintf('=== HISTORICAL DATA ANALYSIS ===\n');
 
@@ -138,6 +144,7 @@ end
 
 fprintf('Analyzing historical data structure with %d cases\n', length(historicalData.caseID));
 
+sourceCohortSummary = createOperationalCohortSummary(historicalData, primaryScheduleCohort);
 filterMetadata = createAnalysisFilterMetadata(historicalData, dateRange, weekdaysOnly, ...
     excludeOperators, minOperatorTotalCases);
 if filterMetadata.filterApplied
@@ -149,10 +156,23 @@ if filterMetadata.filterApplied
         filterMetadata.nCasesBeforeFilter);
 end
 
+cohortSummary = createOperationalCohortSummary(historicalData, primaryScheduleCohort);
+cohortSummary.loadedTimestampValidCohort = sourceCohortSummary;
+displayOperationalCohortSummary(cohortSummary, filterMetadata, sourceCohortSummary);
+primaryHistoricalData = historicalData;
+primaryHistoricalSchedules = historicalSchedules;
+if strcmp(primaryScheduleCohort, 'CompleteOperationalDays')
+    primaryHistoricalData = filterHistoricalDataByMask(historicalData, cohortSummary.completeOperationalDayCaseMask);
+    primaryHistoricalSchedules = filterHistoricalSchedulesByIncludedDates(historicalSchedules, ...
+        cohortSummary.completeOperationalDayDates);
+end
+
 % Initialize results structure
 analysisResults = struct();
 analysisResults.inputOptions = createAnalysisInputOptions(showStats, saveReport, reportFile, ...
-    dateRange, weekdaysOnly, excludeOperators, minOperatorTotalCases, p.Results.HistoricalSchedules, filterMetadata);
+    dateRange, weekdaysOnly, excludeOperators, minOperatorTotalCases, primaryScheduleCohort, ...
+    p.Results.HistoricalSchedules, filterMetadata, cohortSummary);
+analysisResults.cohortSummary = cohortSummary;
 
 % Perform detailed statistical analysis
 [analysisResults.datasetSummary, analysisResults.procedureAnalysis, ...
@@ -175,6 +195,11 @@ analysisResults.datasetSummary.analysisStartDate = filterMetadata.analysisStartD
 analysisResults.datasetSummary.analysisEndDate = filterMetadata.analysisEndDate;
 analysisResults.datasetSummary.nCasesBeforeFilter = filterMetadata.nCasesBeforeFilter;
 analysisResults.datasetSummary.nCasesAfterFilter = filterMetadata.nCasesAfterFilter;
+analysisResults.datasetSummary.primaryScheduleCohort = primaryScheduleCohort;
+analysisResults.datasetSummary.invalidOperationalTimingCaseCount = cohortSummary.invalidCaseCount;
+analysisResults.datasetSummary.invalidOperationalTimingDayCount = cohortSummary.invalidDayCount;
+analysisResults.datasetSummary.completeOperationalDayCaseCount = cohortSummary.completeOperationalDayCaseCount;
+analysisResults.datasetSummary.completeOperationalDayCount = cohortSummary.completeOperationalDayCount;
 
 % Perform comprehensive operator metrics analysis
 operatorMetrics = performOperatorMetricsAnalysis(historicalData, showStats);
@@ -198,7 +223,7 @@ analysisResults.procedurePlottingData = createProcedurePlottingData(procedureAna
 % Perform schedule analysis if historical schedules are provided
 if ~isempty(historicalSchedules)
     [analysisResults.scheduleAnalysis, analysisResults.operatorAnalysis, ...
-     analysisResults.labFlipAnalysis] = performScheduleAnalysis(historicalData, historicalSchedules, showStats);
+     analysisResults.labFlipAnalysis] = performScheduleAnalysis(primaryHistoricalData, primaryHistoricalSchedules, showStats);
 else
     analysisResults.scheduleAnalysis = [];
     analysisResults.operatorAnalysis = [];
@@ -209,7 +234,7 @@ end
 if showStats
     fprintf('\n=== CREATING COMPREHENSIVE OPERATOR METRICS ===\n');
 end
-analysisResults.comprehensiveOperatorMetrics = createComprehensiveOperatorMetrics(historicalData, analysisResults.operatorAnalysis, showStats);
+analysisResults.comprehensiveOperatorMetrics = createComprehensiveOperatorMetrics(primaryHistoricalData, analysisResults.operatorAnalysis, showStats);
 
 analysisResults = applyOperatorLevelExclusions(analysisResults, filterMetadata.finalOperatorLevelExclusions);
 if filterMetadata.operatorExclusionApplied
@@ -221,13 +246,30 @@ analysisResults.timeSeriesAnalysis = createTimeSeriesAnalysis(analysisResults.sc
     analysisResults.operatorAnalysis, analysisResults.labFlipAnalysis);
 analysisResults.manuscriptOperatorAssociation = createManuscriptOperatorAssociation(analysisResults.timeSeriesAnalysis);
 analysisResults.metricDefinitions = createOperationalMetricDefinitions();
+analysisResults.sensitivityAnalysis = struct();
+analysisResults.sensitivityAnalysis.sequenceValid = struct();
+analysisResults.sensitivityAnalysis.sequenceValid.cohortDescription = ...
+    'Sequence-valid sensitivity outputs for flip ratio and operator idle time; operational decomposition and throughput are primary complete-day metrics.';
+if ~isempty(historicalSchedules)
+    [~, sensitivityScheduleAnalysis, sensitivityOperatorAnalysis, sensitivityLabFlipAnalysis] = ...
+        evalc('performScheduleAnalysis(historicalData, historicalSchedules, false)');
+    [sensitivityOperatorAnalysis, sensitivityLabFlipAnalysis] = applyScheduleOperatorExclusions( ...
+        sensitivityOperatorAnalysis, sensitivityLabFlipAnalysis, filterMetadata.finalOperatorLevelExclusions);
+    analysisResults.sensitivityAnalysis.sequenceValid.scheduleAnalysis = sensitivityScheduleAnalysis;
+    analysisResults.sensitivityAnalysis.sequenceValid.operatorAnalysis = sensitivityOperatorAnalysis;
+    analysisResults.sensitivityAnalysis.sequenceValid.labFlipAnalysis = sensitivityLabFlipAnalysis;
+    analysisResults.sensitivityAnalysis.sequenceValid.timeSeriesAnalysis = createTimeSeriesAnalysis( ...
+        sensitivityScheduleAnalysis, sensitivityOperatorAnalysis, sensitivityLabFlipAnalysis);
+    analysisResults.sensitivityAnalysis.sequenceValid.manuscriptOperatorAssociation = ...
+        createManuscriptOperatorAssociation(analysisResults.sensitivityAnalysis.sequenceValid.timeSeriesAnalysis);
+end
 
 % Calculate operator efficiency summary using comprehensive metrics
 analysisResults.scheduleAnalysis.operatorEfficiencySummary = calculateOperatorEfficiencySummary([], [], [], analysisResults.comprehensiveOperatorMetrics);
 
 % Save analysis report if requested
 if saveReport
-    saveAnalysisReport(historicalData, reportFile);
+    saveAnalysisReport(historicalData, reportFile, analysisResults);
     fprintf('\nAnalysis report saved to %s\n', reportFile);
 end
 
@@ -247,6 +289,11 @@ end
 
 function isValid = isValidMinOperatorTotalCases(minCases)
 isValid = isempty(minCases) || (isnumeric(minCases) && isscalar(minCases) && isfinite(minCases) && minCases > 0 && floor(minCases) == minCases);
+end
+
+function isValid = isValidPrimaryScheduleCohort(cohortName)
+isValid = (ischar(cohortName) || (isstring(cohortName) && isscalar(cohortName))) && ...
+    any(strcmp(char(cohortName), {'CompleteOperationalDays', 'SequenceValidCases'}));
 end
 
 function operatorList = normalizeOperatorList(operatorListInput)
@@ -420,6 +467,83 @@ for i = 1:length(fieldList)
 end
 end
 
+function cohortSummary = createOperationalCohortSummary(historicalData, primaryScheduleCohort)
+requiredFields = {'caseID', 'date', 'setupTime', 'procedureTime', 'postTime'};
+if ~all(isfield(historicalData, requiredFields))
+    error('Cohort classification requires fields: %s.', strjoin(requiredFields, ', '));
+end
+
+dateObjects = dateshift(parseHistoricalDateValues(historicalData.date), 'start', 'day');
+setupValid = isfinite(historicalData.setupTime(:)) & historicalData.setupTime(:) > 0;
+procedureValid = isfinite(historicalData.procedureTime(:)) & historicalData.procedureTime(:) > 0;
+postValid = isfinite(historicalData.postTime(:)) & historicalData.postTime(:) > 0;
+validDateMask = ~isnat(dateObjects);
+invalidCaseMask = ~(setupValid & procedureValid & postValid);
+invalidDateValues = unique(dateObjects(invalidCaseMask & validDateMask));
+completeOperationalDayCaseMask = validDateMask & ~ismember(dateObjects, invalidDateValues);
+allDates = unique(dateObjects(validDateMask));
+
+reasonStrings = strings(sum(invalidCaseMask), 1);
+invalidCaseIndices = find(invalidCaseMask);
+for i = 1:length(invalidCaseIndices)
+    caseIndex = invalidCaseIndices(i);
+    reasonParts = {};
+    if ~setupValid(caseIndex)
+        reasonParts{end+1} = 'setupTime'; %#ok<AGROW>
+    end
+    if ~procedureValid(caseIndex)
+        reasonParts{end+1} = 'procedureTime'; %#ok<AGROW>
+    end
+    if ~postValid(caseIndex)
+        reasonParts{end+1} = 'postTime'; %#ok<AGROW>
+    end
+    reasonStrings(i) = string(strjoin(reasonParts, ', '));
+end
+
+cohortSummary = struct();
+cohortSummary.selectedPrimaryScheduleCohort = primaryScheduleCohort;
+cohortSummary.validityRule = 'Complete operational days require finite positive setupTime, procedureTime, and postTime for every case.';
+cohortSummary.evaluatedCaseCount = length(historicalData.caseID);
+cohortSummary.evaluatedDayCount = length(allDates);
+cohortSummary.invalidCaseCount = sum(invalidCaseMask);
+cohortSummary.invalidDayCount = length(invalidDateValues);
+cohortSummary.invalidSetupTimeCaseCount = sum(~setupValid);
+cohortSummary.invalidProcedureTimeCaseCount = sum(~procedureValid);
+cohortSummary.invalidPostTimeCaseCount = sum(~postValid);
+cohortSummary.invalidCaseMask = invalidCaseMask;
+cohortSummary.invalidCaseIDs = historicalData.caseID(invalidCaseMask);
+cohortSummary.invalidCaseDates = dateObjects(invalidCaseMask);
+cohortSummary.invalidCaseReasons = reasonStrings;
+cohortSummary.excludedDayDates = invalidDateValues;
+cohortSummary.excludedDayCaseMask = validDateMask & ismember(dateObjects, invalidDateValues);
+cohortSummary.excludedDayCaseIDs = historicalData.caseID(cohortSummary.excludedDayCaseMask);
+cohortSummary.excludedDayCaseCount = sum(cohortSummary.excludedDayCaseMask);
+cohortSummary.completeOperationalDayCaseMask = completeOperationalDayCaseMask;
+cohortSummary.completeOperationalDayDates = unique(dateObjects(completeOperationalDayCaseMask));
+cohortSummary.completeOperationalDayCaseCount = sum(completeOperationalDayCaseMask);
+cohortSummary.completeOperationalDayCount = length(cohortSummary.completeOperationalDayDates);
+cohortSummary.sequenceValidCaseCount = cohortSummary.evaluatedCaseCount;
+cohortSummary.sequenceValidDayCount = cohortSummary.evaluatedDayCount;
+end
+
+function displayOperationalCohortSummary(cohortSummary, filterMetadata, sourceCohortSummary)
+fprintf('\n--- Operational Timing Cohort Quality ---\n');
+fprintf('  Loaded timestamp-valid cohort: %d cases, %d cases with invalid required component timing across %d days\n', ...
+    sourceCohortSummary.evaluatedCaseCount, sourceCohortSummary.invalidCaseCount, sourceCohortSummary.invalidDayCount);
+if filterMetadata.filterApplied
+    fprintf('  Evaluated analysis cohort after filters: %d cases across %d days\n', ...
+        cohortSummary.evaluatedCaseCount, cohortSummary.evaluatedDayCount);
+end
+fprintf('  Invalid required timing: %d cases across %d days (setup=%d, procedure=%d, post=%d)\n', ...
+    cohortSummary.invalidCaseCount, cohortSummary.invalidDayCount, ...
+    cohortSummary.invalidSetupTimeCaseCount, cohortSummary.invalidProcedureTimeCaseCount, ...
+    cohortSummary.invalidPostTimeCaseCount);
+fprintf('  Complete-operational-day cohort: %d cases across %d days retained; %d cases across %d days excluded\n', ...
+    cohortSummary.completeOperationalDayCaseCount, cohortSummary.completeOperationalDayCount, ...
+    cohortSummary.excludedDayCaseCount, cohortSummary.invalidDayCount);
+fprintf('  Primary schedule cohort: %s\n', cohortSummary.selectedPrimaryScheduleCohort);
+end
+
 function filteredSchedules = filterHistoricalSchedulesByIncludedDates(historicalSchedules, includedDates)
 if isempty(historicalSchedules)
     filteredSchedules = historicalSchedules;
@@ -448,7 +572,8 @@ end
 end
 
 function inputOptions = createAnalysisInputOptions(showStats, saveReport, reportFile, dateRange, ...
-    weekdaysOnly, excludeOperators, minOperatorTotalCases, historicalSchedules, filterMetadata)
+    weekdaysOnly, excludeOperators, minOperatorTotalCases, primaryScheduleCohort, ...
+    historicalSchedules, filterMetadata, cohortSummary)
 inputOptions = struct();
 inputOptions.ShowStats = showStats;
 inputOptions.SaveReport = saveReport;
@@ -458,6 +583,8 @@ inputOptions.NormalizedDateRange = [filterMetadata.analysisStartDate, filterMeta
 inputOptions.WeekdaysOnly = weekdaysOnly;
 inputOptions.ExcludeOperators = excludeOperators;
 inputOptions.MinOperatorTotalCases = minOperatorTotalCases;
+inputOptions.PrimaryScheduleCohort = primaryScheduleCohort;
+inputOptions.OperationalValidityRule = cohortSummary.validityRule;
 inputOptions.HistoricalSchedulesProvided = ~isempty(historicalSchedules);
 if isempty(historicalSchedules)
     inputOptions.HistoricalScheduleCount = 0;
@@ -478,6 +605,10 @@ inputOptions.FinalOperatorLevelExclusions = filterMetadata.finalOperatorLevelExc
 inputOptions.NCasesBeforeFilter = filterMetadata.nCasesBeforeFilter;
 inputOptions.NCasesAfterFilter = filterMetadata.nCasesAfterFilter;
 inputOptions.FilterDescription = filterMetadata.filterDescription;
+inputOptions.InvalidOperationalTimingCaseCount = cohortSummary.invalidCaseCount;
+inputOptions.InvalidOperationalTimingDayCount = cohortSummary.invalidDayCount;
+inputOptions.CompleteOperationalDayCaseCount = cohortSummary.completeOperationalDayCaseCount;
+inputOptions.CompleteOperationalDayCount = cohortSummary.completeOperationalDayCount;
 end
 
 function analysisResults = applyOperatorLevelExclusions(analysisResults, excludedOperators)
@@ -497,6 +628,18 @@ end
 
 if ~isempty(analysisResults.labFlipAnalysis) && isfield(analysisResults.labFlipAnalysis, 'operatorFlipStats')
     analysisResults.labFlipAnalysis.operatorFlipStats = removeOperatorsFromMap(analysisResults.labFlipAnalysis.operatorFlipStats, excludedOperators);
+end
+end
+
+function [operatorAnalysis, labFlipAnalysis] = applyScheduleOperatorExclusions(operatorAnalysis, labFlipAnalysis, excludedOperators)
+if isempty(excludedOperators)
+    return;
+end
+if ~isempty(operatorAnalysis)
+    operatorAnalysis = removeOperatorsFromOperatorAnalysis(operatorAnalysis, excludedOperators);
+end
+if ~isempty(labFlipAnalysis) && isfield(labFlipAnalysis, 'operatorFlipStats')
+    labFlipAnalysis.operatorFlipStats = removeOperatorsFromMap(labFlipAnalysis.operatorFlipStats, excludedOperators);
 end
 end
 
@@ -560,6 +703,12 @@ end
 
 function metricDefinitions = createOperationalMetricDefinitions()
 metricDefinitions = struct();
+metricDefinitions.primaryScheduleCohort = ['Schedule-derived department metrics, throughput, ' ...
+    'bottleneck decomposition, room-gap metrics, and primary manuscript associations use the selected primary cohort; default is complete operational days.'];
+metricDefinitions.completeOperationalDay = ['A calendar day on which every included case has ' ...
+    'finite positive setup, procedure, and post-procedure duration values.'];
+metricDefinitions.sequenceValidSensitivity = ['Sensitivity flip and operator idle-time outputs ' ...
+    'retain the date/weekday-filtered sequence-valid cohort and are not complete-day throughput or bottleneck estimates.'];
 metricDefinitions.operatorTurnovers = ['Number of same-operator consecutive-case ' ...
     'opportunities; already stored as timeSeriesAnalysis.<bin>.department.totalOperatorTurnovers.'];
 metricDefinitions.totalProcedures = ['Number of department procedures completed in the ' ...
@@ -1104,9 +1253,9 @@ function [datasetSummary, procedureAnalysis, surgeonAnalysis, timeAnalysis, room
     if showStats
         fprintf('\n--- Time Duration Analysis ---\n');
     end
-    validSetupTimes = historicalData.setupTime(~isnan(historicalData.setupTime));
-    validProcTimes = historicalData.procedureTime(~isnan(historicalData.procedureTime));
-    validPostTimes = historicalData.postTime(~isnan(historicalData.postTime));
+    validSetupTimes = historicalData.setupTime(isfinite(historicalData.setupTime) & historicalData.setupTime > 0);
+    validProcTimes = historicalData.procedureTime(isfinite(historicalData.procedureTime) & historicalData.procedureTime > 0);
+    validPostTimes = historicalData.postTime(isfinite(historicalData.postTime) & historicalData.postTime > 0);
     
     % Store time analysis results
     timeAnalysis.setupTime = struct('mean', mean(validSetupTimes), 'median', median(validSetupTimes), ...
@@ -2287,7 +2436,7 @@ function operatorMetrics = performOperatorMetricsAnalysis(historicalData, showSt
 end
 
 %% Helper Functions
-function saveAnalysisReport(historicalData, reportFile)
+function saveAnalysisReport(historicalData, reportFile, analysisResults)
 % Save analysis report to text file
 fprintf('Saving analysis report to %s...\n', reportFile);
 
@@ -2298,8 +2447,41 @@ diary on;
 fprintf('=== HISTORICAL DATA ANALYSIS REPORT ===\n');
 fprintf('Generated on: %s\n\n', datestr(now));
 
-% Perform the same analysis as displayed
-performDetailedAnalysis(historicalData);
+cohortSummary = analysisResults.cohortSummary;
+fprintf('--- Operational Timing Cohort Quality ---\n');
+fprintf('Validity rule: %s\n', cohortSummary.validityRule);
+fprintf('Selected primary schedule cohort: %s\n', cohortSummary.selectedPrimaryScheduleCohort);
+sourceCohortSummary = cohortSummary.loadedTimestampValidCohort;
+fprintf('Loaded timestamp-valid cohort: %d cases, %d invalid required-timing cases across %d affected days\n', ...
+    sourceCohortSummary.evaluatedCaseCount, sourceCohortSummary.invalidCaseCount, ...
+    sourceCohortSummary.invalidDayCount);
+fprintf('Evaluated analysis cohort: %d cases across %d days\n', ...
+    cohortSummary.evaluatedCaseCount, cohortSummary.evaluatedDayCount);
+fprintf('Cases with invalid required timing: %d across %d affected days\n', ...
+    cohortSummary.invalidCaseCount, cohortSummary.invalidDayCount);
+fprintf('Invalid components: setup=%d, procedure=%d, post=%d\n', ...
+    cohortSummary.invalidSetupTimeCaseCount, cohortSummary.invalidProcedureTimeCaseCount, ...
+    cohortSummary.invalidPostTimeCaseCount);
+fprintf('Complete-operational-day cohort: %d cases across %d days retained; %d cases excluded\n', ...
+    cohortSummary.completeOperationalDayCaseCount, cohortSummary.completeOperationalDayCount, ...
+    cohortSummary.excludedDayCaseCount);
+if ~isempty(cohortSummary.invalidCaseIDs)
+    fprintf('Invalid required-timing cases:\n');
+    for i = 1:length(cohortSummary.invalidCaseIDs)
+        fprintf('  Case %s (%s): %s\n', char(string(cohortSummary.invalidCaseIDs(i))), ...
+            datestr(cohortSummary.invalidCaseDates(i), 'dd-mmm-yyyy'), ...
+            char(cohortSummary.invalidCaseReasons(i)));
+    end
+end
+if ~isempty(cohortSummary.excludedDayDates)
+    fprintf('Excluded affected dates:\n');
+    for i = 1:length(cohortSummary.excludedDayDates)
+        fprintf('  %s\n', datestr(cohortSummary.excludedDayDates(i), 'dd-mmm-yyyy'));
+    end
+end
+fprintf('\n');
+
+performDetailedAnalysis(historicalData, true);
 
 diary off;
 end

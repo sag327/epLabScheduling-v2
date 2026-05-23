@@ -130,6 +130,17 @@ analysisResultsWeekdays = analyzeHistoricalData(historicalData, ...
     'DateRange', ["01-Oct-2025", "31-Mar-2026"], ...
     'WeekdaysOnly', true);
 
+% Primary schedule/manuscript metrics default to complete operational days.
+analysisResultsCompleteDays = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'WeekdaysOnly', true);
+
+% Flip/idle sensitivity analysis retaining sequence-valid days.
+analysisResultsSequenceValid = analyzeHistoricalData(historicalData, ...
+    'HistoricalSchedules', historicalSchedules, ...
+    'WeekdaysOnly', true, ...
+    'PrimaryScheduleCohort', 'SequenceValidCases');
+
 % Optional: remove selected operators from operator-level summaries/plots only.
 % Department metrics still include all cases in the date/weekday cohort.
 analysisResultsFiltered = analyzeHistoricalData(historicalData, ...
@@ -143,6 +154,7 @@ analysisResultsMinVolume = analyzeHistoricalData(historicalData, ...
 
 % Parsed analysis options are stored for logging/reproducibility.
 disp(analysisResultsFiltered.inputOptions);
+disp(analysisResultsCompleteDays.cohortSummary);
 
 % Stored department operational trends (day/week/month/quarter/year available)
 quarterly = analysisResults.timeSeriesAnalysis.quarter.department;
@@ -158,6 +170,14 @@ wheels-out to next wheels-in gap between consecutive cases in one lab when
 both adjacent room-boundary component times are valid. It is not a separately
 measured breakdown of room cleaning work versus unused room capacity; do not
 report it as both turnover time and room idle time.
+
+By default, schedule-derived metrics use only complete operational days: every
+case on an included day must have finite positive setup, procedure, and
+post-procedure duration values. Every run prints and stores invalid timing
+case/day counts, retained/excluded complete-day counts, component reasons, and
+excluded dates/cases in `analysisResults.cohortSummary`. The
+`SequenceValidCases` option is intended for flip/idle sensitivity analyses,
+not primary throughput or bottleneck reporting.
 
 ### Retrospective Visualization
 ```matlab
