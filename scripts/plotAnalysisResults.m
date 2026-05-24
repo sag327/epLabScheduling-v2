@@ -29,6 +29,23 @@ function plotAnalysisResults(analysisResults, varargin)
 %   - Optional operator-trace figure when 'ShowIndividualOperatorTraces' is true
 %   - Reads precomputed day/week/month/quarter/year series from analysisResults
 %
+% - Operator turnover plot (enable with 'CreateOperatorTurnoverPlot', true):
+%   - Department total same-operator consecutive-case opportunities over time
+%   - Reads precomputed day/week/month/quarter/year series selected by 'TimeBin'
+%
+% - Operator idle-time by flip-status plot (enable with 'CreateOperatorIdleByFlipStatusPlot', true):
+%   - Two-panel binned comparison of idle minutes with vs without a lab flip
+%   - Displays median values by default; set 'FlipIdleStatistic' to 'mean'
+%   - Lower panel shows descriptive minutes saved per flip (not causal recovery)
+%
+% - Bottleneck decomposition plot (enable with 'CreateBottleneckDecompositionPlot', true):
+%   - By default, one whole-period 100% stacked bar for setup, procedure,
+%     post-procedure, and observed same-lab room-gap time
+%   - When 'TimeBin' is supplied, an absolute-minute stacked area plot by
+%     day, week, month, quarter, or year with component percentage labels;
+%     set 'BottleneckScale' to 'percent' for a 100% stacked binned view or
+%     'per_case' for component minutes per procedure in each bin
+%
 % - Manuscript figures:
 %   - 'CreateManuscriptTimeSeriesFigure': publication-styled department flip
 %     ratio and pooled department idle time by stored time bin
@@ -54,6 +71,20 @@ function plotAnalysisResults(analysisResults, varargin)
 %   'CreateIdleFlipCorrelationPlot' - logical, create operator flip/idle
 %                                     correlation plot (default: false)
 %   'CreateTimeSeriesPlot'  - logical, create time series plot (default: false)
+%   'CreateOperatorTurnoverPlot' - logical, plot total operator turnover
+%                                  opportunities by time bin (default: false)
+%   'CreateOperatorIdleByFlipStatusPlot' - logical, plot binned operator idle
+%                                  time with vs without a lab flip and the
+%                                  descriptive difference (default: false)
+%   'FlipIdleStatistic'     - statistic shown in the flip-status plot:
+%                             'median' (default) or 'mean'
+%   'CreateBottleneckDecompositionPlot' - logical, create the department
+%                                    bottleneck duration composition plot
+%                                    (default: false)
+%   'BottleneckScale'       - bottleneck display scale: 'minutes' (default),
+%                             'percent', or 'per_case' (minutes per
+%                             procedure); 'minutes' and 'percent' retain
+%                             the default whole-period percentage bar
 %   'ShowIndividualOperatorTraces' - logical, show the optional individual
 %                                    operator trace figure when plotting
 %                                    time series data (default: false)
@@ -90,6 +121,13 @@ function plotAnalysisResults(analysisResults, varargin)
 %   plotAnalysisResults(analysisResults, 'CreateCorrelationPlot', true, 'CreateTimeSeriesPlot', true)
 %   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'ShowIndividualOperatorTraces', true)
 %   plotAnalysisResults(analysisResults, 'CreateTimeSeriesPlot', true, 'TimeBin', 'month')
+%   plotAnalysisResults(analysisResults, 'CreateOperatorTurnoverPlot', true, 'TimeBin', 'month')
+%   plotAnalysisResults(analysisResults, 'CreateOperatorIdleByFlipStatusPlot', true, 'TimeBin', 'month')
+%   plotAnalysisResults(analysisResults, 'CreateOperatorIdleByFlipStatusPlot', true, 'TimeBin', 'quarter', 'FlipIdleStatistic', 'mean')
+%   plotAnalysisResults(analysisResults, 'CreateBottleneckDecompositionPlot', true)
+%   plotAnalysisResults(analysisResults, 'CreateBottleneckDecompositionPlot', true, 'TimeBin', 'quarter')
+%   plotAnalysisResults(analysisResults, 'CreateBottleneckDecompositionPlot', true, 'TimeBin', 'quarter', 'BottleneckScale', 'percent')
+%   plotAnalysisResults(analysisResults, 'CreateBottleneckDecompositionPlot', true, 'TimeBin', 'quarter', 'BottleneckScale', 'per_case')
 %   plotAnalysisResults(analysisResults, 'CreateManuscriptTimeSeriesFigure', true)
 %   plotAnalysisResults(analysisResults, 'CreateManuscriptAssociationFigure', true, 'TimeBin', 'quarter')
 %   plotAnalysisResults(analysisResults, 'CreateManuscriptAssociationFigure', true, 'ShowOperatorInitialLabels', true)
@@ -101,6 +139,11 @@ p = inputParser();
 addParameter(p, 'CreateCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateIdleFlipCorrelationPlot', false, @islogical);
 addParameter(p, 'CreateTimeSeriesPlot', false, @islogical);
+addParameter(p, 'CreateOperatorTurnoverPlot', false, @islogical);
+addParameter(p, 'CreateOperatorIdleByFlipStatusPlot', false, @islogical);
+addParameter(p, 'FlipIdleStatistic', 'median', @isValidFlipIdleStatisticInput);
+addParameter(p, 'CreateBottleneckDecompositionPlot', false, @islogical);
+addParameter(p, 'BottleneckScale', 'minutes', @isValidBottleneckScaleInput);
 addParameter(p, 'ShowIndividualOperatorTraces', false, @islogical);
 addParameter(p, 'TimeBin', 'day', @isValidTimeBinInput);
 addParameter(p, 'CreateManuscriptTimeSeriesFigure', false, @islogical);
@@ -120,8 +163,14 @@ parse(p, varargin{:});
 doCreateCorrelationPlot = p.Results.CreateCorrelationPlot;
 doCreateIdleFlipCorrelationPlot = p.Results.CreateIdleFlipCorrelationPlot;
 doCreateTimeSeriesPlot = p.Results.CreateTimeSeriesPlot;
+doCreateOperatorTurnoverPlot = p.Results.CreateOperatorTurnoverPlot;
+doCreateOperatorIdleByFlipStatusPlot = p.Results.CreateOperatorIdleByFlipStatusPlot;
+flipIdleStatistic = lower(char(string(p.Results.FlipIdleStatistic)));
+doCreateBottleneckDecompositionPlot = p.Results.CreateBottleneckDecompositionPlot;
+bottleneckScale = lower(char(string(p.Results.BottleneckScale)));
 doShowIndividualOperatorTraces = p.Results.ShowIndividualOperatorTraces;
 timeBin = lower(char(string(p.Results.TimeBin)));
+timeBinWasSpecified = ~any(strcmp(p.UsingDefaults, 'TimeBin'));
 doCreateManuscriptTimeSeriesFigure = p.Results.CreateManuscriptTimeSeriesFigure;
 doCreateManuscriptAssociationFigure = p.Results.CreateManuscriptAssociationFigure;
 doCreateManuscriptOperatorAssociationFigure = p.Results.CreateManuscriptOperatorAssociationFigure;
@@ -135,7 +184,9 @@ doCreateDailyDeptScatter = p.Results.CreateDailyDeptScatter;
 selectedProcedure = p.Results.SelectedProcedure;
 selectedMetric = p.Results.SelectedMetric;
 specificPlotRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
-    doCreateTimeSeriesPlot || doCreateManuscriptTimeSeriesFigure || ...
+    doCreateTimeSeriesPlot || doCreateOperatorTurnoverPlot || doCreateOperatorIdleByFlipStatusPlot || ...
+    doCreateBottleneckDecompositionPlot || ...
+    doCreateManuscriptTimeSeriesFigure || ...
     doCreateManuscriptAssociationFigure || doCreateManuscriptOperatorAssociationFigure || ...
     doCreateOperatorSummaryFigure || doCreateBoxPlots || doCreateDailyDeptScatter;
 
@@ -167,8 +218,41 @@ if doCreateManuscriptTimeSeriesFigure || doCreateManuscriptAssociationFigure || 
             'association', exportFormat, exportResolution);
     end
     exploratoryRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
-        doCreateTimeSeriesPlot || doCreateOperatorSummaryFigure || doCreateBoxPlots || doCreateDailyDeptScatter;
+        doCreateTimeSeriesPlot || doCreateOperatorTurnoverPlot || doCreateOperatorIdleByFlipStatusPlot || ...
+        doCreateBottleneckDecompositionPlot || ...
+        doCreateOperatorSummaryFigure || doCreateBoxPlots || doCreateDailyDeptScatter;
     if defaultManuscriptSuite || ~exploratoryRequested
+        return;
+    end
+end
+
+if doCreateBottleneckDecompositionPlot
+    createBottleneckDecompositionPlot(analysisResults, timeBin, timeBinWasSpecified, bottleneckScale);
+    remainingPlotRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
+        doCreateTimeSeriesPlot || doCreateOperatorTurnoverPlot || doCreateOperatorIdleByFlipStatusPlot || ...
+        doCreateOperatorSummaryFigure || ...
+        doCreateBoxPlots || doCreateDailyDeptScatter;
+    if ~remainingPlotRequested
+        return;
+    end
+end
+
+if doCreateOperatorTurnoverPlot
+    createOperatorTurnoverPlot(analysisResults, timeBin);
+    remainingPlotRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
+        doCreateTimeSeriesPlot || doCreateOperatorIdleByFlipStatusPlot || doCreateOperatorSummaryFigure || ...
+        doCreateBoxPlots || doCreateDailyDeptScatter;
+    if ~remainingPlotRequested
+        return;
+    end
+end
+
+if doCreateOperatorIdleByFlipStatusPlot
+    createOperatorIdleByFlipStatusPlot(analysisResults, timeBin, flipIdleStatistic);
+    remainingPlotRequested = doCreateCorrelationPlot || doCreateIdleFlipCorrelationPlot || ...
+        doCreateTimeSeriesPlot || doCreateOperatorSummaryFigure || ...
+        doCreateBoxPlots || doCreateDailyDeptScatter;
+    if ~remainingPlotRequested
         return;
     end
 end
@@ -859,6 +943,393 @@ else
 end
 end
 
+function fig = createOperatorTurnoverPlot(analysisResults, timeBin)
+% Plot same-operator consecutive-case opportunities from stored binned totals.
+timeSeries = getStoredOperatorTurnoverSeries(analysisResults, timeBin);
+dateObjects = timeSeries.binStartDates(:);
+turnovers = timeSeries.department.totalOperatorTurnovers(:);
+
+if isempty(dateObjects) || numel(dateObjects) ~= numel(turnovers)
+    error('Stored %s turnover summaries do not contain valid matching bin dates.', timeBin);
+end
+if any(~isfinite(turnovers)) || any(turnovers < 0)
+    error('Stored %s operator turnover totals must be finite and nonnegative.', timeBin);
+end
+
+fig = figure('Name', 'Operator Turnovers Over Time', 'NumberTitle', 'off', ...
+    'Tag', 'OperatorTurnoverFigure', ...
+    'Position', [420, 220, 1240, 700], 'Color', 'w', 'InvertHardcopy', 'off');
+ax = axes('Parent', fig);
+applyReadableTimeSeriesAxesStyle(ax);
+hold(ax, 'on');
+
+turnoverColor = [0.08 0.35 0.62];
+plot(ax, dateObjects, turnovers, 'o-', 'Tag', 'OperatorTurnoverSeries', ...
+    'Color', turnoverColor, 'MarkerFaceColor', turnoverColor, ...
+    'LineWidth', 1.5, 'MarkerSize', 5);
+title(ax, sprintf('Operator Turnover Opportunities by %s', capitalizeBinName(timeBin)));
+xlabel(ax, 'Date');
+ylabel(ax, 'Operator turnovers (count)');
+setTimeSeriesXLimits(ax, dateObjects);
+formatStoredTimeAxis(ax, timeSeries);
+text(ax, 0.995, 0.02, ...
+    'Operator turnover = same-operator consecutive-case opportunity', ...
+    'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+    'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
+hold(ax, 'off');
+end
+
+function fig = createOperatorIdleByFlipStatusPlot(analysisResults, timeBin, statistic)
+% Plot stored flip-stratified operator idle summaries and descriptive difference.
+timeSeries = getStoredOperatorIdleByFlipStatusSeries(analysisResults, timeBin);
+dateObjects = timeSeries.binStartDates(:);
+idleByFlipStatus = timeSeries.department.operatorIdleByFlipStatus;
+if strcmp(statistic, 'median')
+    statisticField = 'medianIdleMinutes';
+    differenceField = 'medianMinutesSavedPerFlip';
+    statisticLabel = 'Median';
+else
+    statisticField = 'meanIdleMinutes';
+    differenceField = 'meanMinutesSavedPerFlip';
+    statisticLabel = 'Mean';
+end
+
+flippedIdle = idleByFlipStatus.flipped.(statisticField)(:);
+notFlippedIdle = idleByFlipStatus.notFlipped.(statisticField)(:);
+minutesSaved = idleByFlipStatus.(differenceField)(:);
+validateOperatorIdleByFlipStatusValues(dateObjects, flippedIdle, notFlippedIdle, minutesSaved, timeBin);
+
+fig = figure('Name', 'Operator Idle Time by Flip Status', 'NumberTitle', 'off', ...
+    'Tag', 'OperatorIdleByFlipStatusFigure', ...
+    'Position', [420, 140, 1240, 860], 'Color', 'w', 'InvertHardcopy', 'off');
+layout = tiledlayout(fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+comparisonAx = nexttile(layout, 1);
+applyReadableTimeSeriesAxesStyle(comparisonAx);
+hold(comparisonAx, 'on');
+flippedColor = [0.10 0.48 0.63];
+notFlippedColor = [0.77 0.31 0.20];
+plot(comparisonAx, dateObjects, flippedIdle, 'o-', 'Tag', 'OperatorIdleFlippedSeries', ...
+    'DisplayName', 'With lab flip', 'Color', flippedColor, ...
+    'MarkerFaceColor', flippedColor, 'LineWidth', 1.5, 'MarkerSize', 5);
+plot(comparisonAx, dateObjects, notFlippedIdle, 'o-', 'Tag', 'OperatorIdleNotFlippedSeries', ...
+    'DisplayName', 'Without lab flip', 'Color', notFlippedColor, ...
+    'MarkerFaceColor', notFlippedColor, 'LineWidth', 1.5, 'MarkerSize', 5);
+title(comparisonAx, sprintf('%s Operator Idle Time by Flip Status and %s', ...
+    statisticLabel, capitalizeBinName(timeBin)));
+ylabel(comparisonAx, sprintf('%s idle time (minutes)', lower(statisticLabel)));
+setTimeSeriesXLimits(comparisonAx, dateObjects);
+formatStoredTimeAxis(comparisonAx, timeSeries);
+legend(comparisonAx, 'Location', 'best', 'Box', 'off');
+hold(comparisonAx, 'off');
+
+savingsAx = nexttile(layout, 2);
+applyReadableTimeSeriesAxesStyle(savingsAx);
+hold(savingsAx, 'on');
+savingsColor = [0.24 0.52 0.30];
+yline(savingsAx, 0, ':', 'Color', [0.45 0.45 0.45], 'HandleVisibility', 'off');
+plot(savingsAx, dateObjects, minutesSaved, 'o-', 'Tag', 'OperatorIdleMinutesSavedSeries', ...
+    'Color', savingsColor, 'MarkerFaceColor', savingsColor, ...
+    'LineWidth', 1.5, 'MarkerSize', 5);
+title(savingsAx, sprintf('Descriptive %s Minutes Saved per Flip', statisticLabel));
+xlabel(savingsAx, 'Date');
+ylabel(savingsAx, 'Without flip - with flip (minutes)');
+setTimeSeriesXLimits(savingsAx, dateObjects);
+formatStoredTimeAxis(savingsAx, timeSeries);
+text(savingsAx, 0.995, 0.02, ...
+    'Difference is descriptive, not a causal recovered-capacity estimate; gaps = missing comparison group', ...
+    'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+    'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
+hold(savingsAx, 'off');
+end
+
+function validateOperatorIdleByFlipStatusValues(dateObjects, flippedIdle, notFlippedIdle, minutesSaved, timeBin)
+if isempty(dateObjects) || numel(dateObjects) ~= numel(flippedIdle) || ...
+        numel(dateObjects) ~= numel(notFlippedIdle) || numel(dateObjects) ~= numel(minutesSaved)
+    error('Stored %s operator idle-by-flip summaries do not contain valid matching bin values.', timeBin);
+end
+plotValues = [flippedIdle; notFlippedIdle; minutesSaved];
+if any(isinf(plotValues)) || any(flippedIdle(isfinite(flippedIdle)) < 0) || ...
+        any(notFlippedIdle(isfinite(notFlippedIdle)) < 0)
+    error('Stored %s operator idle-by-flip values must be nonnegative idle minutes or missing values.', timeBin);
+end
+end
+
+function fig = createBottleneckDecompositionPlot(analysisResults, timeBin, timeBinWasSpecified, bottleneckScale)
+% Plot department bottleneck components using observed room-gap time.
+componentLabels = {'Setup', 'Procedure', 'Post-procedure', 'Observed lab idle / room-gap'};
+componentColors = [0.22 0.49 0.72; ...
+    0.16 0.63 0.45; ...
+    0.93 0.64 0.20; ...
+    0.66 0.66 0.66];
+
+if timeBinWasSpecified
+    [componentMinutes, timeSeries] = getStoredBottleneckComponents(analysisResults, timeBin);
+else
+    [dailyMinutes, dailySeries] = getStoredBottleneckComponents(analysisResults, 'day');
+    componentMinutes = sum(dailyMinutes, 1);
+    timeSeries = struct();
+end
+
+totalMinutes = sum(componentMinutes, 2);
+if ~any(totalMinutes > 0)
+    error(['No nonzero bottleneck duration totals are available to plot. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules and an included operational cohort.']);
+end
+if strcmp(bottleneckScale, 'per_case')
+    if timeBinWasSpecified
+        procedureCounts = getStoredBottleneckProcedureCounts(timeSeries, timeBin);
+    else
+        procedureCounts = sum(getStoredBottleneckProcedureCounts(dailySeries, 'day'));
+    end
+end
+
+fig = figure('Name', 'Bottleneck Decomposition', 'NumberTitle', 'off', ...
+    'Tag', 'BottleneckDecompositionFigure', ...
+    'Position', [420, 220, 1400, 760], 'Color', 'w', 'InvertHardcopy', 'off');
+ax = axes('Parent', fig);
+applyReadableTimeSeriesAxesStyle(ax);
+hold(ax, 'on');
+
+if ~timeBinWasSpecified && ~strcmp(bottleneckScale, 'per_case')
+    totalDuration = sum(componentMinutes);
+    percentages = componentMinutes ./ totalDuration * 100;
+    plotHandles = bar(ax, 1, percentages, 'stacked', 'BarWidth', 0.55);
+    for componentIdx = 1:length(plotHandles)
+        plotHandles(componentIdx).FaceColor = componentColors(componentIdx, :);
+        plotHandles(componentIdx).EdgeColor = 'none';
+        plotHandles(componentIdx).Tag = sprintf('BottleneckComponent%d', componentIdx);
+    end
+    addBottleneckPercentageLabels(ax, 1, percentages, percentages);
+    title(ax, 'Bottleneck Duration Decomposition for Full Included Period');
+    ylabel(ax, 'Share of total duration (%)');
+    xticks(ax, 1);
+    xticklabels(ax, {'Full included period'});
+    ylim(ax, [0 100]);
+elseif ~timeBinWasSpecified
+    perCaseMinutes = componentMinutes ./ procedureCounts;
+    percentages = componentMinutes ./ sum(componentMinutes) * 100;
+    plotHandles = bar(ax, 1, perCaseMinutes, 'stacked', 'BarWidth', 0.55);
+    for componentIdx = 1:length(plotHandles)
+        plotHandles(componentIdx).FaceColor = componentColors(componentIdx, :);
+        plotHandles(componentIdx).EdgeColor = 'none';
+        plotHandles(componentIdx).Tag = sprintf('BottleneckComponent%d', componentIdx);
+    end
+    addBottleneckPercentageLabels(ax, 1, perCaseMinutes, percentages);
+    title(ax, 'Average Bottleneck Duration per Procedure for Full Included Period');
+    ylabel(ax, 'Duration per procedure (minutes/procedure)');
+    xticks(ax, 1);
+    xticklabels(ax, {'Full included period'});
+else
+    dateObjects = timeSeries.binStartDates;
+    if isempty(dateObjects) || length(dateObjects) ~= size(componentMinutes, 1)
+        error('Stored %s bottleneck summaries do not contain valid matching bin dates.', timeBin);
+    end
+    percentages = NaN(size(componentMinutes));
+    validBins = totalMinutes > 0;
+    percentages(validBins, :) = componentMinutes(validBins, :) ./ totalMinutes(validBins) * 100;
+    areaDates = dateObjects;
+    if strcmp(bottleneckScale, 'percent')
+        areaValues = percentages;
+    elseif strcmp(bottleneckScale, 'per_case')
+        areaValues = NaN(size(componentMinutes));
+        validProcedureBins = procedureCounts > 0;
+        areaValues(validProcedureBins, :) = componentMinutes(validProcedureBins, :) ./ procedureCounts(validProcedureBins);
+    else
+        areaValues = componentMinutes;
+    end
+    if isscalar(dateObjects)
+        areaDates = [dateObjects; getSingleBottleneckBinEndDate(timeSeries, timeBin, dateObjects)];
+        areaValues = [areaValues; areaValues];
+    end
+    plotHandles = area(ax, areaDates, areaValues, 'LineStyle', 'none');
+    for componentIdx = 1:length(plotHandles)
+        plotHandles(componentIdx).FaceColor = componentColors(componentIdx, :);
+        plotHandles(componentIdx).FaceAlpha = 0.88;
+        plotHandles(componentIdx).Tag = sprintf('BottleneckComponent%d', componentIdx);
+    end
+    addBottleneckPercentageLabels(ax, dateObjects, areaValues(1:size(componentMinutes, 1), :), percentages);
+    if strcmp(bottleneckScale, 'percent')
+        title(ax, sprintf('Bottleneck Duration Composition by %s', capitalizeBinName(timeBin)));
+        ylabel(ax, 'Share of bin duration (%)');
+        ylim(ax, [0 100]);
+    elseif strcmp(bottleneckScale, 'per_case')
+        title(ax, sprintf('Average Bottleneck Duration per Procedure by %s', capitalizeBinName(timeBin)));
+        ylabel(ax, 'Duration per procedure (minutes/procedure)');
+    else
+        title(ax, sprintf('Bottleneck Duration Decomposition by %s', capitalizeBinName(timeBin)));
+        ylabel(ax, 'Duration (minutes)');
+    end
+    xlabel(ax, 'Date');
+    if isscalar(areaDates)
+        setTimeSeriesXLimits(ax, areaDates);
+    else
+        xlim(ax, [areaDates(1), areaDates(end)]);
+    end
+    formatStoredTimeAxis(ax, timeSeries);
+end
+
+legend(ax, plotHandles, componentLabels, 'Location', 'eastoutside', ...
+    'FontSize', 9, 'Box', 'off');
+if strcmp(bottleneckScale, 'per_case')
+    plotNote = ['Room-gap burden per procedure = observed same-lab inter-case ' ...
+        'minutes / procedures; not mean interval duration'];
+else
+    plotNote = 'Room-gap time = observed wheels-out to next wheels-in interval in the same lab';
+end
+text(ax, 0.995, 0.02, plotNote, ...
+    'Units', 'normalized', 'HorizontalAlignment', 'right', ...
+    'VerticalAlignment', 'bottom', 'FontSize', 9, 'Color', [0.35 0.35 0.35]);
+hold(ax, 'off');
+end
+
+function endDate = getSingleBottleneckBinEndDate(timeSeries, timeBin, startDate)
+if isfield(timeSeries, 'binEndDates') && ~isempty(timeSeries.binEndDates) && ...
+        ~isnat(timeSeries.binEndDates(1)) && timeSeries.binEndDates(1) > startDate
+    endDate = timeSeries.binEndDates(1);
+    return;
+end
+switch timeBin
+    case 'day'
+        endDate = startDate + days(1);
+    case 'week'
+        endDate = startDate + calweeks(1);
+    case 'month'
+        endDate = startDate + calmonths(1);
+    case 'quarter'
+        endDate = startDate + calmonths(3);
+    case 'year'
+        endDate = startDate + calyears(1);
+end
+end
+
+function [componentMinutes, timeSeries] = getStoredBottleneckComponents(analysisResults, timeBin)
+if ~isfield(analysisResults, 'timeSeriesAnalysis') || ...
+        ~isfield(analysisResults.timeSeriesAnalysis, timeBin)
+    error(['Bottleneck time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules to create stored bottleneck results.'], timeBin);
+end
+timeSeries = analysisResults.timeSeriesAnalysis.(timeBin);
+if ~isfield(timeSeries, 'department') || ~isfield(timeSeries.department, 'bottleneck')
+    error(['Bottleneck time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules to create stored bottleneck results.'], timeBin);
+end
+bottleneck = timeSeries.department.bottleneck;
+fieldNames = {'totalSetupMinutes', 'totalProcedureMinutes', 'totalPostMinutes', ...
+    'totalObservedSameLabInterCaseMinutes'};
+for fieldIdx = 1:length(fieldNames)
+    if ~isfield(bottleneck, fieldNames{fieldIdx})
+        error(['Stored %s summaries do not contain %s. ' ...
+            'Rerun analyzeHistoricalData to regenerate bottleneck results.'], ...
+            timeBin, fieldNames{fieldIdx});
+    end
+end
+componentMinutes = [bottleneck.totalSetupMinutes(:), ...
+    bottleneck.totalProcedureMinutes(:), bottleneck.totalPostMinutes(:), ...
+    bottleneck.totalObservedSameLabInterCaseMinutes(:)];
+if any(~isfinite(componentMinutes), 'all') || any(componentMinutes < 0, 'all')
+    error('Stored %s bottleneck duration totals must be finite and nonnegative.', timeBin);
+end
+end
+
+function procedureCounts = getStoredBottleneckProcedureCounts(timeSeries, timeBin)
+if ~isfield(timeSeries, 'department') || ~isfield(timeSeries.department, 'volume') || ...
+        ~isfield(timeSeries.department.volume, 'totalProcedures')
+    error(['Stored %s summaries do not contain procedure-count denominators. ' ...
+        'Rerun analyzeHistoricalData to regenerate per-case bottleneck results.'], timeBin);
+end
+procedureCounts = timeSeries.department.volume.totalProcedures(:);
+if any(~isfinite(procedureCounts)) || any(procedureCounts < 0)
+    error('Stored %s procedure-count denominators must be finite and nonnegative.', timeBin);
+end
+if numel(procedureCounts) ~= numel(timeSeries.binStartDates)
+    error('Stored %s procedure counts do not contain valid matching bin values.', timeBin);
+end
+if ~any(procedureCounts > 0)
+    error('No procedure-count denominator is available to plot per-case %s bottleneck durations.', timeBin);
+end
+end
+
+function addBottleneckPercentageLabels(ax, xValues, componentHeights, percentages)
+cumulativeHeights = cumsum(componentHeights, 2);
+for binIdx = 1:size(componentHeights, 1)
+    for componentIdx = 1:size(componentHeights, 2)
+        if ~isfinite(componentHeights(binIdx, componentIdx)) || componentHeights(binIdx, componentIdx) <= 0
+            continue;
+        end
+        yValue = cumulativeHeights(binIdx, componentIdx) - componentHeights(binIdx, componentIdx) / 2;
+        text(ax, xValues(binIdx), yValue, sprintf('%.1f%%', percentages(binIdx, componentIdx)), ...
+            'Tag', 'BottleneckPercentageLabel', 'HorizontalAlignment', 'center', ...
+            'VerticalAlignment', 'middle', 'FontSize', 8, ...
+            'Color', [0.10 0.10 0.10], 'FontWeight', 'bold');
+    end
+end
+end
+
+function formatStoredTimeAxis(ax, timeSeries)
+numBins = length(timeSeries.binStartDates);
+if numBins <= 12
+    tickIdx = 1:numBins;
+else
+    tickIdx = unique(round(linspace(1, numBins, 10)));
+end
+xticks(ax, timeSeries.binStartDates(tickIdx));
+if isfield(timeSeries, 'binLabels') && numel(timeSeries.binLabels) == numBins
+    xticklabels(ax, timeSeries.binLabels(tickIdx));
+end
+xtickangle(ax, 35);
+end
+
+function timeSeries = getStoredOperatorTurnoverSeries(analysisResults, timeBin)
+if ~isfield(analysisResults, 'timeSeriesAnalysis') || ...
+        ~isfield(analysisResults.timeSeriesAnalysis, timeBin)
+    error(['Operator turnover time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules to create stored turnover results.'], timeBin);
+end
+timeSeries = analysisResults.timeSeriesAnalysis.(timeBin);
+if ~isfield(timeSeries, 'department') || ...
+        ~isfield(timeSeries.department, 'totalOperatorTurnovers')
+    error(['Operator turnover time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules to create stored turnover results.'], timeBin);
+end
+end
+
+function timeSeries = getStoredOperatorIdleByFlipStatusSeries(analysisResults, timeBin)
+if ~isfield(analysisResults, 'timeSeriesAnalysis') || ...
+        ~isfield(analysisResults.timeSeriesAnalysis, timeBin)
+    error(['Operator idle-by-flip time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules to create stored idle-by-flip results.'], timeBin);
+end
+timeSeries = analysisResults.timeSeriesAnalysis.(timeBin);
+if ~isfield(timeSeries, 'department') || ...
+        ~isfield(timeSeries.department, 'operatorIdleByFlipStatus')
+    error(['Operator idle-by-flip time-series summaries are not available for ''%s''. ' ...
+        'Rerun analyzeHistoricalData with HistoricalSchedules to create stored idle-by-flip results.'], timeBin);
+end
+idleByFlipStatus = timeSeries.department.operatorIdleByFlipStatus;
+requiredGroups = {'flipped', 'notFlipped'};
+requiredSummaryFields = {'meanIdleMinutes', 'medianIdleMinutes'};
+for groupIdx = 1:length(requiredGroups)
+    groupName = requiredGroups{groupIdx};
+    if ~isfield(idleByFlipStatus, groupName)
+        error('Stored %s operator idle-by-flip summaries do not contain %s results.', timeBin, groupName);
+    end
+    for summaryIdx = 1:length(requiredSummaryFields)
+        if ~isfield(idleByFlipStatus.(groupName), requiredSummaryFields{summaryIdx})
+            error('Stored %s operator idle-by-flip summaries do not contain %s.%s.', ...
+                timeBin, groupName, requiredSummaryFields{summaryIdx});
+        end
+    end
+end
+requiredDifferenceFields = {'meanMinutesSavedPerFlip', 'medianMinutesSavedPerFlip'};
+for fieldIdx = 1:length(requiredDifferenceFields)
+    if ~isfield(idleByFlipStatus, requiredDifferenceFields{fieldIdx})
+        error('Stored %s operator idle-by-flip summaries do not contain %s.', ...
+            timeBin, requiredDifferenceFields{fieldIdx});
+    end
+end
+end
+
 function timeSeries = getStoredTimeSeries(analysisResults, timeBin)
 if ~isfield(analysisResults, 'timeSeriesAnalysis') || ...
         ~isfield(analysisResults.timeSeriesAnalysis, timeBin)
@@ -1222,6 +1693,16 @@ end
 function isValid = isValidTimeBinInput(timeBin)
 isValid = (ischar(timeBin) || (isstring(timeBin) && isscalar(timeBin))) && ...
     any(strcmpi(char(string(timeBin)), {'day', 'week', 'month', 'quarter', 'year'}));
+end
+
+function isValid = isValidBottleneckScaleInput(scale)
+isValid = (ischar(scale) || (isstring(scale) && isscalar(scale))) && ...
+    any(strcmpi(char(string(scale)), {'minutes', 'percent', 'per_case'}));
+end
+
+function isValid = isValidFlipIdleStatisticInput(statistic)
+isValid = (ischar(statistic) || (isstring(statistic) && isscalar(statistic))) && ...
+    any(strcmpi(char(string(statistic)), {'median', 'mean'}));
 end
 
 function isValid = isValidExportFormatInput(exportFormat)

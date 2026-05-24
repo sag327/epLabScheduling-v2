@@ -89,13 +89,16 @@ function analysisResults = analyzeHistoricalData(historicalData, varargin)
 %               overallDeptTotalLabFlipsDaily, overallDeptFlipToTurnoverRatioDaily, 
 %               overallDeptMakespanDaily, overallDeptTotalRoomBusyTimeDaily (setup+proc+post),
 %               overallDeptAvgConcurrentLabsDaily, overallDeptNumLabsActiveDaily,
-%               overallDeptOperatorsWithOutpatientDaily
+%               overallDeptOperatorsWithOutpatientDaily,
+%               operatorIdleByFlipStatus with pooled flipped/non-flipped
+%               transition idle values and summary statistics
 %               operationalMetrics with procedure volume/duration,
 %               throughput denominators, component times, and observed
 %               same-lab inter-case intervals
 %           .summary with means/stds and correlations:
 %               mean/std of idleToTurnover, flipToTurnover, avgConcurrentLabs; and
-%               corrIdle_vs_FlipTurnover, corrIdle_vs_AvgConcurrentLabs (pearson/spearman)
+%               corrIdle_vs_FlipTurnover, corrIdle_vs_AvgConcurrentLabs (pearson/spearman);
+%               operatorIdleByFlipStatus for pooled flip-stratified idle comparisons
 %
 %   Also displays analysis summary if ShowStats is true
 %
@@ -159,6 +162,7 @@ end
 cohortSummary = createOperationalCohortSummary(historicalData, primaryScheduleCohort);
 cohortSummary.loadedTimestampValidCohort = sourceCohortSummary;
 displayOperationalCohortSummary(cohortSummary, filterMetadata, sourceCohortSummary);
+displayOperatorExclusionSummary(filterMetadata);
 primaryHistoricalData = historicalData;
 primaryHistoricalSchedules = historicalSchedules;
 if strcmp(primaryScheduleCohort, 'CompleteOperationalDays')
@@ -571,6 +575,53 @@ for i = 1:length(scheduleKeys)
 end
 end
 
+function displayOperatorExclusionSummary(exclusionMetadata)
+if ~exclusionMetadata.operatorExclusionApplied
+    return;
+end
+
+fprintf('\n--- Operator-Level Exclusions ---\n');
+if isempty(exclusionMetadata.excludedOperatorsRequested)
+    fprintf('  Requested via ExcludeOperators: none\n');
+else
+    fprintf('  Requested via ExcludeOperators: %s\n', ...
+        strjoin(exclusionMetadata.excludedOperatorsRequested, '; '));
+end
+if isempty(exclusionMetadata.excludedOperatorsMatched)
+    fprintf('  Matched requested operators to exclude: none\n');
+else
+    fprintf('  Matched requested operators to exclude: %s\n', ...
+        strjoin(exclusionMetadata.excludedOperatorsMatched, '; '));
+end
+if ~isempty(exclusionMetadata.excludedOperatorsUnmatched)
+    fprintf('  Requested operators not found and not excluded: %s\n', ...
+        strjoin(exclusionMetadata.excludedOperatorsUnmatched, '; '));
+end
+if exclusionMetadata.minOperatorTotalCasesApplied
+    fprintf('  Minimum operator total-case threshold: %d cases\n', ...
+        exclusionMetadata.minOperatorTotalCases);
+    if isempty(exclusionMetadata.operatorsExcludedByMinCases)
+        fprintf('  Operators below threshold to exclude: none\n');
+    else
+        fprintf('  Operators below threshold to exclude: %s\n', ...
+            strjoin(exclusionMetadata.operatorsExcludedByMinCases, '; '));
+    end
+end
+if isempty(exclusionMetadata.finalOperatorLevelExclusions)
+    fprintf('  Final operators excluded from operator-level analyses: none\n');
+else
+    fprintf('  Final operators excluded from operator-level analyses: %s\n', ...
+        strjoin(exclusionMetadata.finalOperatorLevelExclusions, '; '));
+end
+fprintf(['  Excluded from returned/downstream: operator metrics/plots, procedure-by-operator summaries/plots, ' ...
+    'comprehensive operator metrics, and operator idle/flip time-series and ' ...
+    'association outputs when schedules are available.\n']);
+fprintf(['  Preserved in: dataset, procedure-wide, surgeon, time, and room summaries; ' ...
+    'department schedule, throughput, bottleneck, and department time-series outputs.\n']);
+fprintf(['  Note: calculation-time console summaries may show the inclusive source cohort; ' ...
+    'exclusions govern returned/downstream operator outputs.\n']);
+end
+
 function inputOptions = createAnalysisInputOptions(showStats, saveReport, reportFile, dateRange, ...
     weekdaysOnly, excludeOperators, minOperatorTotalCases, primaryScheduleCohort, ...
     historicalSchedules, filterMetadata, cohortSummary)
@@ -711,6 +762,10 @@ metricDefinitions.sequenceValidSensitivity = ['Sensitivity flip and operator idl
     'retain the date/weekday-filtered sequence-valid cohort and are not complete-day throughput or bottleneck estimates.'];
 metricDefinitions.operatorTurnovers = ['Number of same-operator consecutive-case ' ...
     'opportunities; already stored as timeSeriesAnalysis.<bin>.department.totalOperatorTurnovers.'];
+metricDefinitions.operatorIdleByFlipStatus = ['Nonnegative operator idle minutes between ' ...
+    'consecutive same-operator procedures with valid procedure-boundary times, grouped by ' ...
+    'whether the next case is performed in a different lab. Mean/median minutes saved per ' ...
+    'flip equal non-flipped idle minus flipped idle and are descriptive associations, not causal estimates.'];
 metricDefinitions.totalProcedures = ['Number of department procedures completed in the ' ...
     'calendar bin.'];
 metricDefinitions.procedureDuration = ['Valid observed procedure start-to-complete duration ' ...
@@ -809,8 +864,11 @@ department.bottleneck = struct('totalSetupMinutes', zeros(numBins, 1), ...
     'medianObservedSameLabInterCaseMinutes', NaN(numBins, 1), ...
     'observedSameLabInterCaseCount', zeros(numBins, 1), ...
     'totalOperatorIdleMinutes', zeros(numBins, 1));
+department.operatorIdleByFlipStatus = initializeBinnedOperatorIdleByFlipStatus(numBins);
 procedureDurationValues = cell(numBins, 1);
 observedSameLabInterCaseValues = cell(numBins, 1);
+flippedOperatorIdleValues = cell(numBins, 1);
+notFlippedOperatorIdleValues = cell(numBins, 1);
 
 hasDailyEfficiency = isfield(scheduleAnalysis, 'dailyEfficiency') && ...
     isfield(scheduleAnalysis.dailyEfficiency, 'byDate') && ...
@@ -839,6 +897,12 @@ if hasDailyEfficiency
         if isfield(dayData, 'overallDeptTotalOperatorIdleTimeDaily') && isfinite(dayData.overallDeptTotalOperatorIdleTimeDaily)
             department.totalOperatorIdleMinutes(binIdx) = department.totalOperatorIdleMinutes(binIdx) + ...
                 dayData.overallDeptTotalOperatorIdleTimeDaily;
+        end
+        if isfield(dayData, 'operatorIdleByFlipStatus')
+            flippedOperatorIdleValues{binIdx} = [flippedOperatorIdleValues{binIdx}, ...
+                dayData.operatorIdleByFlipStatus.flipped.idleMinutes];
+            notFlippedOperatorIdleValues{binIdx} = [notFlippedOperatorIdleValues{binIdx}, ...
+                dayData.operatorIdleByFlipStatus.notFlipped.idleMinutes];
         end
         if isfield(dayData, 'operationalMetrics')
             dailyOperations = dayData.operationalMetrics;
@@ -904,6 +968,20 @@ for binIdx = 1:numBins
         department.bottleneck.medianObservedSameLabInterCaseMinutes(binIdx) = ...
             median(observedSameLabInterCaseValues{binIdx});
     end
+    flipStatusSummary = summarizeOperatorIdleByFlipStatus( ...
+        flippedOperatorIdleValues{binIdx}, notFlippedOperatorIdleValues{binIdx});
+    groupNames = {'flipped', 'notFlipped'};
+    summaryNames = {'count', 'totalIdleMinutes', 'meanIdleMinutes', 'medianIdleMinutes'};
+    for groupIdx = 1:length(groupNames)
+        for summaryIdx = 1:length(summaryNames)
+            department.operatorIdleByFlipStatus.(groupNames{groupIdx}).(summaryNames{summaryIdx})(binIdx) = ...
+                flipStatusSummary.(groupNames{groupIdx}).(summaryNames{summaryIdx});
+        end
+    end
+    department.operatorIdleByFlipStatus.meanMinutesSavedPerFlip(binIdx) = ...
+        flipStatusSummary.meanMinutesSavedPerFlip;
+    department.operatorIdleByFlipStatus.medianMinutesSavedPerFlip(binIdx) = ...
+        flipStatusSummary.medianMinutesSavedPerFlip;
 end
 validDepartmentHours = department.throughput.totalDepartmentOperatingHours > 0;
 department.throughput.proceduresPerDepartmentOperatingHour(validDepartmentHours) = ...
@@ -917,6 +995,20 @@ validObservedIntervals = department.bottleneck.observedSameLabInterCaseCount > 0
 department.bottleneck.meanObservedSameLabInterCaseMinutes(validObservedIntervals) = ...
     department.bottleneck.totalObservedSameLabInterCaseMinutes(validObservedIntervals) ./ ...
     department.bottleneck.observedSameLabInterCaseCount(validObservedIntervals);
+end
+
+function binnedSummary = initializeBinnedOperatorIdleByFlipStatus(numBins)
+binnedSummary = struct();
+binnedSummary.flipped = struct('count', zeros(numBins, 1), ...
+    'totalIdleMinutes', zeros(numBins, 1), ...
+    'meanIdleMinutes', NaN(numBins, 1), ...
+    'medianIdleMinutes', NaN(numBins, 1));
+binnedSummary.notFlipped = struct('count', zeros(numBins, 1), ...
+    'totalIdleMinutes', zeros(numBins, 1), ...
+    'meanIdleMinutes', NaN(numBins, 1), ...
+    'medianIdleMinutes', NaN(numBins, 1));
+binnedSummary.meanMinutesSavedPerFlip = NaN(numBins, 1);
+binnedSummary.medianMinutesSavedPerFlip = NaN(numBins, 1);
 end
 
 function operators = buildOperatorBinnedSeries(operatorAnalysis, labFlipAnalysis, sourceBinIndex, numBins)
@@ -1447,6 +1539,8 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     dailyTotalOperatorIdleList = zeros(1, numSchedules);
     dailyLabTurnoverList = zeros(1, numSchedules);
     dailyOperatorTurnoverList = zeros(1, numSchedules);
+    pooledFlippedOperatorIdleMinutes = [];
+    pooledNotFlippedOperatorIdleMinutes = [];
     
     % Get all unique operators across all schedules for consistent arrays
     allOperators = {};
@@ -1500,7 +1594,8 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
         if isfield(schedule, 'operators')
             
             % Calculate operator idle times and lab flips
-            [dayIdleStats, dayFlipStats, dayLabFlipsCount, dayOperatorTurnoverStats] = analyzeOperatorIdleTimeAndFlips(schedule.operators, schedule.labs);
+            [dayIdleStats, dayFlipStats, dayLabFlipsCount, dayOperatorTurnoverStats, ...
+                dayOperatorIdleByFlipStatus] = analyzeOperatorIdleTimeAndFlips(schedule.operators, schedule.labs);
             
             % Store daily lab flips for this date
             dailyLabFlips(i) = dayLabFlipsCount;
@@ -1587,7 +1682,12 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
             dayEff.overallDeptTotalRoomBusyTimeDaily = totalRoomBusyTime;
             dayEff.overallDeptAvgConcurrentLabsDaily = avgConcurrentLabs;
             dayEff.overallDeptNumLabsActiveDaily = numLabsActive;
+            dayEff.operatorIdleByFlipStatus = dayOperatorIdleByFlipStatus;
             dayEff.operationalMetrics = dailyOperations;
+            pooledFlippedOperatorIdleMinutes = [pooledFlippedOperatorIdleMinutes, ...
+                dayOperatorIdleByFlipStatus.flipped.idleMinutes];
+            pooledNotFlippedOperatorIdleMinutes = [pooledNotFlippedOperatorIdleMinutes, ...
+                dayOperatorIdleByFlipStatus.notFlipped.idleMinutes];
             
             % Calculate number of operators with outpatient procedures this day
             operatorsWithOutpatient = 0;
@@ -1803,6 +1903,8 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
     dailySummary.totalLabTurnovers = sum(dailyLabTurnoverList, 'omitnan');
     dailySummary.totalOperatorTurnovers = sum(dailyOperatorTurnoverList, 'omitnan');
     dailySummary.totalLabFlips = sum(dailyLabFlips, 'omitnan');
+    dailySummary.operatorIdleByFlipStatus = summarizeOperatorIdleByFlipStatus( ...
+        pooledFlippedOperatorIdleMinutes, pooledNotFlippedOperatorIdleMinutes);
 
     if any(validIdle)
         v = dailyIdleToTurnoverList(validIdle);
@@ -1908,6 +2010,7 @@ function [scheduleAnalysis, operatorAnalysis, labFlipAnalysis] = performSchedule
         fprintf('  Lab flips/lab turnover (secondary mean daily): %.2f±%.2f\n', ...
             dailySummary.meanLabFlipPerLabTurnover, dailySummary.stdLabFlipPerLabTurnover);
         fprintf('  Avg concurrent labs (setup+proc+post): mean %.2f, std %.2f\n', dailySummary.meanAvgConcurrentLabs, dailySummary.stdAvgConcurrentLabs);
+        displayOperatorIdleByFlipStatusSummary(dailySummary.operatorIdleByFlipStatus);
         ci = dailySummary.corrIdle_vs_FlipTurnover;
         fprintf('  Corr Idle/Lab Turnover vs Lab Flips/Lab Turnover: Pearson r=%.3f (p=%.3f), Spearman r=%.3f (p=%.3f)\n', ci.pearson_r, ci.pearson_p, ci.spearman_r, ci.spearman_p);
         cj = dailySummary.corrIdle_vs_AvgConcurrentLabs;
@@ -2480,6 +2583,14 @@ if ~isempty(cohortSummary.excludedDayDates)
     end
 end
 fprintf('\n');
+displayOperatorExclusionSummary(analysisResults.datasetSummary);
+if isfield(analysisResults, 'scheduleAnalysis') && isstruct(analysisResults.scheduleAnalysis) && ...
+        isfield(analysisResults.scheduleAnalysis, 'dailyEfficiency') && ...
+        isfield(analysisResults.scheduleAnalysis.dailyEfficiency, 'summary') && ...
+        isfield(analysisResults.scheduleAnalysis.dailyEfficiency.summary, 'operatorIdleByFlipStatus')
+    displayOperatorIdleByFlipStatusSummary( ...
+        analysisResults.scheduleAnalysis.dailyEfficiency.summary.operatorIdleByFlipStatus);
+end
 
 performDetailedAnalysis(historicalData, true);
 
@@ -3253,12 +3364,14 @@ function displayOperatorIdleTimeAndFlipAnalysis(operatorIdleStats, operatorFlipS
 end
 
 %% Operator Idle Time and Lab Flip Analysis
-function [idleStats, flipStats, totalLabFlips, operatorTurnoverStats] = analyzeOperatorIdleTimeAndFlips(operators, labs)
+function [idleStats, flipStats, totalLabFlips, operatorTurnoverStats, flipStatusSummary] = analyzeOperatorIdleTimeAndFlips(operators, labs)
     % Initialize outputs
     idleStats = containers.Map();
     flipStats = containers.Map();
     operatorTurnoverStats = containers.Map();
     totalLabFlips = 0;
+    flippedIdleMinutes = [];
+    notFlippedIdleMinutes = [];
     
     operatorNames = keys(operators);
     
@@ -3298,8 +3411,9 @@ function [idleStats, flipStats, totalLabFlips, operatorTurnoverStats] = analyzeO
                     nextCase = sortedSchedule(j+1);
                     hasTurnover = false;
                     
-                    if isfield(currentCase.caseInfo, 'procEndTime') && isfield(nextCase.caseInfo, 'procStartTime')
-                        idleTime = nextCase.caseInfo.procStartTime - currentCase.caseInfo.procEndTime;
+                    if isfield(currentCase.caseInfo, 'procEndTime') && isfield(nextCase.caseInfo, 'procStartTime') && ...
+                            isfinite(currentCase.caseInfo.procEndTime) && isfinite(nextCase.caseInfo.procStartTime)
+                        idleTime = max(nextCase.caseInfo.procStartTime - currentCase.caseInfo.procEndTime, 0);
                         if idleTime > 0
                             totalIdleTime = totalIdleTime + idleTime;
                         end
@@ -3316,6 +3430,13 @@ function [idleStats, flipStats, totalLabFlips, operatorTurnoverStats] = analyzeO
 
                     if hasTurnover
                         operatorTurnoverCount = operatorTurnoverCount + 1;
+                        if isfield(currentCase, 'lab') && isfield(nextCase, 'lab')
+                            if currentCase.lab ~= nextCase.lab
+                                flippedIdleMinutes(end+1) = idleTime; %#ok<AGROW>
+                            else
+                                notFlippedIdleMinutes(end+1) = idleTime; %#ok<AGROW>
+                            end
+                        end
                     end
                 end
             end
@@ -3328,6 +3449,41 @@ function [idleStats, flipStats, totalLabFlips, operatorTurnoverStats] = analyzeO
     
     % Count total daily lab flips across all operators
     % This is already counted in the loop above via totalLabFlips
+    flipStatusSummary = summarizeOperatorIdleByFlipStatus(flippedIdleMinutes, notFlippedIdleMinutes);
+end
+
+function summary = summarizeOperatorIdleByFlipStatus(flippedIdleMinutes, notFlippedIdleMinutes)
+summary = struct();
+summary.flipped = summarizeOperatorIdleGroup(flippedIdleMinutes);
+summary.notFlipped = summarizeOperatorIdleGroup(notFlippedIdleMinutes);
+summary.meanMinutesSavedPerFlip = NaN;
+summary.medianMinutesSavedPerFlip = NaN;
+if summary.flipped.count > 0 && summary.notFlipped.count > 0
+    summary.meanMinutesSavedPerFlip = ...
+        summary.notFlipped.meanIdleMinutes - summary.flipped.meanIdleMinutes;
+    summary.medianMinutesSavedPerFlip = ...
+        summary.notFlipped.medianIdleMinutes - summary.flipped.medianIdleMinutes;
+end
+end
+
+function group = summarizeOperatorIdleGroup(idleMinutes)
+idleMinutes = idleMinutes(isfinite(idleMinutes) & idleMinutes >= 0);
+group = struct('idleMinutes', idleMinutes, 'count', length(idleMinutes), ...
+    'totalIdleMinutes', sum(idleMinutes), 'meanIdleMinutes', NaN, 'medianIdleMinutes', NaN);
+if ~isempty(idleMinutes)
+    group.meanIdleMinutes = mean(idleMinutes);
+    group.medianIdleMinutes = median(idleMinutes);
+end
+end
+
+function displayOperatorIdleByFlipStatusSummary(summary)
+fprintf('\n--- Operator Idle Time by Lab Flip Status ---\n');
+fprintf('  With lab flip: %d transitions, mean %.1f min, median %.1f min\n', ...
+    summary.flipped.count, summary.flipped.meanIdleMinutes, summary.flipped.medianIdleMinutes);
+fprintf('  Without lab flip: %d transitions, mean %.1f min, median %.1f min\n', ...
+    summary.notFlipped.count, summary.notFlipped.meanIdleMinutes, summary.notFlipped.medianIdleMinutes);
+fprintf('  Descriptive minutes saved per flip: mean-based %.1f min, median-based %.1f min\n', ...
+    summary.meanMinutesSavedPerFlip, summary.medianMinutesSavedPerFlip);
 end
 
 %% Comprehensive Operator Metrics Function

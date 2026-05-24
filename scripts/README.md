@@ -80,6 +80,7 @@ disp(quarterly.duration.medianProcedureDurationMinutes);         % Procedure sta
 disp(quarterly.throughput.proceduresPerDepartmentOperatingHour); % Service-line throughput
 disp(quarterly.throughput.proceduresPerActiveLabHour);           % Capacity-adjusted throughput
 disp(quarterly.bottleneck);                                      % Time-component totals
+disp(quarterly.operatorIdleByFlipStatus);                         % Idle time with vs without flip
 
 % Default output: two manuscript-ready figures
 % 1) Department quarterly time series; 2) two-panel association figure
@@ -99,6 +100,46 @@ plotAnalysisResults(analysisResults, ...
     'CreateTimeSeriesPlot', true, ...
     'TimeBin', 'quarter', ...
     'ShowIndividualOperatorTraces', true);
+
+% Plot department operator-turnover opportunities over a selected interval.
+plotAnalysisResults(analysisResults, ...
+    'CreateOperatorTurnoverPlot', true, ...
+    'TimeBin', 'quarter');
+
+% Compare operator idle time with vs without lab flips over time.
+% Median is displayed by default, with a second panel for the descriptive difference.
+plotAnalysisResults(analysisResults, ...
+    'CreateOperatorIdleByFlipStatusPlot', true, ...
+    'TimeBin', 'quarter');
+
+% Display means instead of medians for the flip-status comparison.
+plotAnalysisResults(analysisResults, ...
+    'CreateOperatorIdleByFlipStatusPlot', true, ...
+    'TimeBin', 'quarter', ...
+    'FlipIdleStatistic', 'mean');
+
+% Bottleneck decomposition over the full included period:
+% one 100% stacked bar with duration-share labels.
+plotAnalysisResults(analysisResults, ...
+    'CreateBottleneckDecompositionPlot', true);
+
+% Bottleneck decomposition over time:
+% absolute-minute stacked areas with within-quarter percentage labels.
+plotAnalysisResults(analysisResults, ...
+    'CreateBottleneckDecompositionPlot', true, ...
+    'TimeBin', 'quarter');
+
+% Normalize each time bin to show composition; each populated bin sums to 100%.
+plotAnalysisResults(analysisResults, ...
+    'CreateBottleneckDecompositionPlot', true, ...
+    'TimeBin', 'quarter', ...
+    'BottleneckScale', 'percent');
+
+% Normalize component totals by procedures in each bin.
+plotAnalysisResults(analysisResults, ...
+    'CreateBottleneckDecompositionPlot', true, ...
+    'TimeBin', 'quarter', ...
+    'BottleneckScale', 'per_case');
 
 % Manuscript-quality primary figure: department process and outcome metrics
 % Uses quarterly bins by default when TimeBin is omitted.
@@ -125,9 +166,19 @@ plotAnalysisResults(analysisResults, ...
 
 `analyzeHistoricalData` creates denominator-preserving time-series summaries for day, week, month, quarter, and year. Within each bin, flip ratio is computed as summed lab flips divided by summed operator turnover opportunities, idle time per turnover uses summed idle minutes and turnovers, procedure duration means/medians use pooled valid observed procedure start-to-complete observations, and throughput uses pooled procedures divided by pooled operating-hour denominators. Procedures per department operating hour is the service-line throughput measure; procedures per active lab-hour is retained as its capacity-adjusted companion.
 
+`timeSeriesAnalysis.<bin>.department.operatorIdleByFlipStatus` stores valid same-operator transition idle minutes separately for flipped and non-flipped transitions, including count, total, mean, and median idle minutes and descriptive mean/median minutes saved per flip (`notFlipped - flipped`). The same pooled full-period summary is stored in `scheduleAnalysis.dailyEfficiency.summary.operatorIdleByFlipStatus` and printed in the analysis report. These differences describe observed association with flipping and are not causal recovery estimates.
+
 Schedule-derived outputs default to the complete-operational-day cohort: setup, procedure, and post-procedure durations must be finite and positive for every included case on a day. The function always prints and logs invalid case/day counts, retained complete-day counts, component-specific invalid counts, and excluded dates/cases in `analysisResults.cohortSummary`. Use `'PrimaryScheduleCohort', 'SequenceValidCases'` for a flip/idle sensitivity analysis that retains otherwise sequence-valid days; do not interpret that sensitivity run as complete-day throughput or bottleneck decomposition.
 
+When `ExcludeOperators` or `MinOperatorTotalCases` is supplied, `analyzeHistoricalData` prints and saves an operator-exclusion summary listing requested names, matched and unmatched requested names, threshold-derived exclusions, final exclusions, and which returned/downstream operator-level outputs exclude them. Department schedule, throughput, bottleneck, and department time-series outputs continue to retain those operators.
+
 The `bottleneck` output stores summed valid observed setup, procedure, post-procedure, operator idle, and observed same-lab inter-case minutes. An observed same-lab inter-case interval is the reconstructed wheels-out–to–next-wheels-in gap in a single lab and is included only when both adjacent room-boundary component times are valid; it should not be interpreted as separately measured cleaning/turnover work or independently measured unused room time. Metric definitions are stored in `analysisResults.metricDefinitions`.
+
+`CreateBottleneckDecompositionPlot` displays setup, procedure, post-procedure, and observed lab idle/room-gap totals. With no `TimeBin`, it aggregates the full included analysis period into one percentage-labelled composition bar. With an explicit `TimeBin` of `day`, `week`, `month`, `quarter`, or `year`, it displays absolute minutes as stacked areas and labels each nonzero component by its within-bin percentage. Set `'BottleneckScale', 'percent'` to render a normalized stacked area in which each populated bin sums to 100%; bins without any displayed duration appear as gaps. Set `'BottleneckScale', 'per_case'` to divide each component total by `department.volume.totalProcedures` in its bin and plot minutes per procedure. For observed same-lab room-gap time, this represents room-gap burden allocated per procedure, not the mean room-gap interval duration.
+
+`CreateOperatorTurnoverPlot` displays `department.totalOperatorTurnovers` over the selected `TimeBin`, where an operator turnover is a same-operator consecutive-case opportunity. This is an opportunity-count plot; it does not itself estimate time savings.
+
+`CreateOperatorIdleByFlipStatusPlot` displays a two-panel binned comparison from `department.operatorIdleByFlipStatus`: idle minutes with versus without a lab flip and descriptive minutes saved per flip (`without flip - with flip`). It defaults to medians; set `'FlipIdleStatistic', 'mean'` to display means instead. The plot supports every `TimeBin` and displays gaps in the saved-minutes series when a bin lacks either comparison group. The displayed difference is an observed association, not a causal recovered-capacity estimate.
 
 `plotAnalysisResults` defaults to a two-figure manuscript suite: a department time-series figure and a combined two-panel association figure. Department manuscript panels use full-department flip and pooled idle-time metrics and are unaffected by operator-level exclusions; the operator panel uses the included operator cohort, pooled flip ratios, median idle time per turnover, and square-root-scaled point size based on turnover opportunities. Operator initials are displayed only when explicitly requested. Use `'ExportFormat', 'tiff', 'ExportResolution', 600` for high-resolution raster submission output. Individual exploratory operator traces retain gaps for bins without turnover opportunities. Date-window and weekday filtering belong in `analyzeHistoricalData`, so summaries and plots stay consistent.
 
